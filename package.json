@@ -9,8 +9,10 @@
         "@modelcontextprotocol/sdk": "^1.10.2",
         "@netlify/functions": "^2.5.1",
         "@types/express": "^5.0.1",
+        "@types/node-fetch": "^2.6.12",
         "express": "^5.1.0",
         "fetch-to-node": "^2.0.0",
+        "node-fetch": "^2.6.7",
         "serverless-http": "^3.2.0",
         "zod": "^3.24.3"
     }
