@@ -375,6 +375,467 @@ export const setupMCPServer = (): McpServer => {
     }
   );
 
+  // Register a tool for converting Machina templates to custom agents
+  server.tool(
+    "convert-template-to-agent",
+    "Converts a Machina template to a customized agent configuration",
+    {
+      template_name: z
+        .string()
+        .describe("The name of the template to convert (e.g., 'soccer-match-recap-en')"),
+      agent_name: z
+        .string()
+        .describe("The name for the new agent"),
+      agent_description: z
+        .string()
+        .describe("A short description of the agent's purpose")
+        .optional(),
+      parameters: z
+        .record(z.any())
+        .describe("Custom parameters to apply to the template (format depends on the specific template)")
+        .optional(),
+      language: z
+        .string()
+        .describe("The language for the agent (e.g., 'en', 'es', 'pt-br')")
+        .default("en"),
+      output_format: z
+        .enum(["yaml", "json"])
+        .describe("The output format for the agent configuration")
+        .default("yaml"),
+    },
+    async ({ template_name, agent_name, agent_description, parameters, language, output_format }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        // Notify that we're starting the template conversion
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Starting conversion of template "${template_name}" to agent "${agent_name}"...`,
+          },
+        });
+
+        // GitHub API URLs for fetching repository content
+        const apiBaseUrl = "https://api.github.com/repos/machina-sports/machina-templates";
+        
+        // Function to fetch repository content
+        async function fetchRepoContent(path: string) {
+          const url = `${apiBaseUrl}/contents/${path}`;
+          const response = await fetch(url, {
+            headers: {
+              "Accept": "application/vnd.github.v3+json",
+              "User-Agent": "MachinaTemplateConverter"
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch GitHub content for ${path}: ${response.statusText}`);
+          }
+          
+          return await response.json();
+        }
+
+        // Function to fetch file content
+        async function fetchFileContent(url: string) {
+          const response = await fetch(url, {
+            headers: {
+              "Accept": "application/vnd.github.v3.raw",
+              "User-Agent": "MachinaTemplateConverter"
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch file content: ${response.statusText}`);
+          }
+          
+          return await response.text();
+        }
+
+        // Check if the template exists
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Searching for template "${template_name}"...`,
+          },
+        });
+
+        // Fetch all templates to find the requested one
+        const templatesList = await fetchRepoContent('agent-templates');
+        const templateMatch = templatesList.find((template: any) => 
+          template.name.toLowerCase() === template_name.toLowerCase());
+        
+        if (!templateMatch) {
+          throw new Error(`Template "${template_name}" not found. Please use the browse-machina-templates tool to find available templates.`);
+        }
+
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Template found! Fetching template files...`,
+          },
+        });
+
+        // Fetch template directory contents to find YAML/configuration files
+        const templateFiles = await fetchRepoContent(`agent-templates/${templateMatch.name}`);
+        const configFiles = templateFiles.filter((file: any) => 
+          file.name.endsWith('.yaml') || file.name.endsWith('.yml') || 
+          file.name.endsWith('.json'));
+        
+        if (configFiles.length === 0) {
+          throw new Error(`No configuration files found in template "${template_name}"`);
+        }
+
+        // Fetch the configuration file content
+        const configFile = configFiles[0]; // Take the first config file
+        const configContent = await fetchFileContent(configFile.download_url);
+        
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Analyzing template configuration...`,
+          },
+        });
+
+        // Determine if YAML or JSON and parse accordingly
+        let templateConfig: any;
+        let isYaml = false;
+        
+        if (configFile.name.endsWith('.yaml') || configFile.name.endsWith('.yml')) {
+          isYaml = true;
+          // For YAML parsing, we'll use a simple regex-based approach since we don't have a YAML library
+          // In a production environment, you would use a proper YAML library
+          templateConfig = parseSimpleYaml(configContent);
+        } else {
+          templateConfig = JSON.parse(configContent);
+        }
+
+        // Extract available parameters from the template
+        const availableParams = extractTemplateParameters(templateConfig);
+        
+        // Check if we need to request additional parameters from the user
+        if (availableParams.length > 0 && (!parameters || Object.keys(parameters).length === 0)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Template "${template_name}" requires the following parameters:\n\n` +
+                      availableParams.map(param => `- ${param.name}: ${param.description || 'No description'}`).join('\n') + 
+                      `\n\nPlease call this tool again with the "parameters" field populated with values for these parameters.`,
+              },
+            ],
+          };
+        }
+
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Applying customizations and generating agent configuration...`,
+          },
+        });
+
+        // Apply user parameters to the template
+        const customizedConfig = applyParameters(templateConfig, parameters, {
+          name: agent_name,
+          description: agent_description || inferTemplateDescription(template_name),
+          language: language
+        });
+
+        // Convert the configuration to the requested output format
+        let outputConfig: string;
+        
+        if (output_format === 'yaml' && !isYaml) {
+          outputConfig = convertJsonToYaml(customizedConfig);
+        } else if (output_format === 'json' && isYaml) {
+          outputConfig = JSON.stringify(customizedConfig, null, 2);
+        } else {
+          // Same format as input
+          outputConfig = isYaml ? 
+            convertJsonToYaml(customizedConfig) : 
+            JSON.stringify(customizedConfig, null, 2);
+        }
+
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Successfully created agent "${agent_name}" from template "${template_name}"!`,
+          },
+        });
+
+        // Return the generated agent configuration
+        return {
+          content: [
+            {
+              type: "text",
+              text: `# ${agent_name} Agent Configuration\n` +
+                    `Generated from template: ${template_name}\n\n` +
+                    `## Configuration (${output_format.toUpperCase()}):\n\n` +
+                    "```" + output_format + "\n" +
+                    outputConfig + 
+                    "\n```\n\n" +
+                    "## Next Steps:\n" +
+                    "1. Save this configuration to a file named `" + agent_name.toLowerCase().replace(/\s+/g, '-') + "." + output_format + "`\n" +
+                    "2. Import the configuration into your Machina instance\n" +
+                    "3. Configure any required connectors\n" +
+                    "4. Test your new agent with sample data\n\n" +
+                    "For more information on deploying agents, visit: https://docs.machina.gg/deploy-sports-agent",
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error converting template to agent:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error converting template to agent: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Helper function to parse simple YAML (basic implementation)
+  function parseSimpleYaml(yamlString: string): any {
+    const result: any = {};
+    const lines = yamlString.split('\n');
+    let currentSection: any = result;
+    let sectionStack: any[] = [result];
+    let indentLevel = 0;
+    
+    for (const line of lines) {
+      // Skip comments and empty lines
+      if (line.trim().startsWith('#') || line.trim() === '') continue;
+      
+      // Calculate indentation level
+      const currentIndent = line.search(/\S/);
+      if (currentIndent === -1) continue; // Skip completely empty lines
+      
+      // Handle indentation changes
+      if (currentIndent > indentLevel) {
+        indentLevel = currentIndent;
+      } else if (currentIndent < indentLevel) {
+        // Going back up in the hierarchy
+        const levelsUp = Math.floor((indentLevel - currentIndent) / 2);
+        for (let i = 0; i < levelsUp; i++) {
+          sectionStack.pop();
+        }
+        currentSection = sectionStack[sectionStack.length - 1];
+        indentLevel = currentIndent;
+      }
+      
+      // Parse the current line
+      if (line.includes(':')) {
+        const [key, value] = line.split(':', 2).map(part => part.trim());
+        if (!key) continue;
+        
+        if (!value || value === '') {
+          // This is a new section
+          currentSection[key] = {};
+          sectionStack.push(currentSection[key]);
+          currentSection = currentSection[key];
+        } else {
+          // This is a key-value pair
+          // Handle quoted values
+          if ((value.startsWith('"') && value.endsWith('"')) || 
+              (value.startsWith("'") && value.endsWith("'"))) {
+            currentSection[key] = value.substring(1, value.length - 1);
+          } 
+          // Handle boolean values
+          else if (value === 'true' || value === 'false') {
+            currentSection[key] = value === 'true';
+          } 
+          // Handle numeric values
+          else if (!isNaN(Number(value))) {
+            currentSection[key] = Number(value);
+          } 
+          // Handle null values
+          else if (value === 'null') {
+            currentSection[key] = null;
+          } 
+          // Handle arrays
+          else if (value.startsWith('[') && value.endsWith(']')) {
+            try {
+              currentSection[key] = JSON.parse(value);
+            } catch (e) {
+              currentSection[key] = value; // fallback to string if parsing fails
+            }
+          } 
+          // Default to string
+          else {
+            currentSection[key] = value;
+          }
+        }
+      } else if (line.trim().startsWith('-')) {
+        // This is a list item, but we'll handle it simply for now
+        const listItem = line.trim().substring(1).trim();
+        if (!currentSection.items) {
+          currentSection.items = [];
+        }
+        currentSection.items.push(listItem);
+      }
+    }
+    
+    return result;
+  }
+
+  // Helper function to convert JSON to a simple YAML format
+  function convertJsonToYaml(json: any, indent: number = 0): string {
+    const indentStr = ' '.repeat(indent);
+    let yamlStr = '';
+    
+    if (typeof json !== 'object' || json === null) {
+      // For primitive values
+      if (typeof json === 'string') {
+        // Check if we need quotes (special characters or spaces)
+        if (json.includes('\n') || json.includes(':') || json.includes('#') || 
+            json.trim() !== json || json === '') {
+          yamlStr += `"${json.replace(/"/g, '\\"')}"`;
+        } else {
+          yamlStr += json;
+        }
+      } else {
+        yamlStr += String(json);
+      }
+    } else if (Array.isArray(json)) {
+      // For arrays
+      if (json.length === 0) {
+        yamlStr += '[]';
+      } else {
+        for (const item of json) {
+          yamlStr += `\n${indentStr}- `;
+          
+          if (typeof item === 'object' && item !== null) {
+            // For nested objects in arrays, increase indentation
+            const nestedYaml = convertJsonToYaml(item, indent + 2);
+            if (nestedYaml.startsWith('\n')) {
+              yamlStr += nestedYaml.substring(1); // Skip the first newline
+            } else {
+              yamlStr += nestedYaml;
+            }
+          } else {
+            yamlStr += convertJsonToYaml(item, 0); // No indentation for primitives
+          }
+        }
+      }
+    } else {
+      // For objects
+      const keys = Object.keys(json);
+      if (keys.length === 0) {
+        yamlStr += '{}';
+      } else {
+        for (const key of keys) {
+          const value = json[key];
+          yamlStr += `\n${indentStr}${key}: `;
+          
+          if (typeof value === 'object' && value !== null) {
+            // For nested objects, increase indentation
+            const nestedYaml = convertJsonToYaml(value, indent + 2);
+            if (nestedYaml.startsWith('\n')) {
+              yamlStr += nestedYaml; // Keep the first newline
+            } else {
+              yamlStr += nestedYaml;
+            }
+          } else {
+            yamlStr += convertJsonToYaml(value, 0); // No indentation for primitives
+          }
+        }
+      }
+    }
+    
+    return yamlStr;
+  }
+
+  // Extract parameter definitions from a template configuration
+  function extractTemplateParameters(config: any): Array<{ name: string, description: string }> {
+    const parameters: Array<{ name: string, description: string }> = [];
+    
+    // This function recursively scans the configuration object for parameter placeholders
+    function scanForParameters(obj: any, path: string = '') {
+      if (!obj || typeof obj !== 'object') return;
+      
+      // Check if this is an array
+      if (Array.isArray(obj)) {
+        obj.forEach((item, index) => {
+          scanForParameters(item, `${path}[${index}]`);
+        });
+        return;
+      }
+      
+      // Look for objects with parameter definitions
+      if (obj.type === 'parameter' || obj.__placeholder === true) {
+        parameters.push({
+          name: path || obj.name || 'unknown',
+          description: obj.description || `Parameter for ${path}`
+        });
+        return;
+      }
+      
+      // Recursively scan object properties
+      for (const key in obj) {
+        scanForParameters(obj[key], path ? `${path}.${key}` : key);
+      }
+    }
+    
+    scanForParameters(config);
+    
+    return parameters;
+  }
+
+  // Apply parameters to the template configuration
+  function applyParameters(config: any, userParams: any = {}, agentInfo: { name: string, description: string, language: string }): any {
+    // Create a deep copy of the config
+    const result = JSON.parse(JSON.stringify(config));
+    
+    // Set basic agent properties if present in the configuration
+    if (result.name !== undefined) {
+      result.name = agentInfo.name;
+    }
+    
+    if (result.description !== undefined) {
+      result.description = agentInfo.description;
+    }
+    
+    // This function recursively replaces parameter placeholders with user values
+    function replaceParameters(obj: any): any {
+      if (!obj || typeof obj !== 'object') return obj;
+      
+      // Handle arrays
+      if (Array.isArray(obj)) {
+        return obj.map(item => replaceParameters(item));
+      }
+      
+      // Check if this is a parameter placeholder
+      if (obj.type === 'parameter' || obj.__placeholder === true) {
+        const paramName = obj.name || '';
+        if (userParams && userParams[paramName] !== undefined) {
+          // If this is a complex parameter with children, merge rather than replace
+          if (typeof userParams[paramName] === 'object' && typeof obj.default === 'object') {
+            return {
+              ...obj.default,
+              ...userParams[paramName]
+            };
+          }
+          return userParams[paramName];
+        }
+        return obj.default !== undefined ? obj.default : obj;
+      }
+      
+      // Process regular objects
+      const newObj: any = {};
+      for (const key in obj) {
+        newObj[key] = replaceParameters(obj[key]);
+      }
+      return newObj;
+    }
+    
+    return replaceParameters(result);
+  }
+
   // Create a resource that provides information about available documentation
   server.resource(
     "machina-docs-resource",
@@ -408,6 +869,19 @@ export const setupMCPServer = (): McpServer => {
                 commonUseCases: ["recap", "quiz", "poll", "image", "summary", "briefing", "websearch"],
                 languages: ["en", "es", "pt-br"],
                 contentTypes: ["templates", "connectors", "both"]
+              },
+              templateToAgent: {
+                description: "Machina Template to Agent Conversion Tool",
+                tool: "convert-template-to-agent",
+                requiredParameters: ["template_name", "agent_name"],
+                optionalParameters: ["agent_description", "parameters", "language", "output_format"],
+                supportedOutputFormats: ["yaml", "json"],
+                workflow: [
+                  "Browse available templates using browse-machina-templates",
+                  "Select a template and provide a name for your new agent",
+                  "Customize parameters specific to the template",
+                  "Generate agent configuration in YAML or JSON format"
+                ]
               }
             }, null, 2),
           },
