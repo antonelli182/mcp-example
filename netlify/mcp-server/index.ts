@@ -6,52 +6,32 @@ import {
   ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import "fetch-to-node";
+import yaml from "js-yaml";
 
 export const setupMCPServer = (): McpServer => {
-
   const server = new McpServer(
     {
-      name: "machina-docs-server",
+      name: "machina-sports-server",
       version: "1.0.0",
     },
     { capabilities: { logging: {} } }
   );
 
-  // Register a prompt template that allows the server to
-  // provide the context structure and (optionally) the variables
-  // that should be placed inside of the prompt for client to fill in.
-  server.prompt(
-    "greeting-template",
-    "A simple greeting prompt template",
-    {
-      name: z.string().describe("Name to include in greeting"),
-    },
-    async ({ name }): Promise<GetPromptResult> => {
-      return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: `Please greet ${name} in a friendly manner.`,
-            },
-          },
-        ],
-      };
-    }
-  );
-
   // Register a documentation tool to fetch Machina documentation
   server.tool(
     "get-machina-docs",
-    "Fetches documentation from docs.machina.gg",
+    "Fetches comprehensive documentation from docs.machina.gg",
     {
       page: z
         .string()
         .describe("The specific page or section to fetch (default is 'introduction')")
         .default("introduction"),
+      format: z
+        .enum(["text", "html", "markdown"])
+        .describe("Format of the returned documentation")
+        .default("text"),
     },
-    async ({ page }, { sendNotification }): Promise<CallToolResult> => {
+    async ({ page, format }, { sendNotification }): Promise<CallToolResult> => {
       try {
         // Notify the client that we're starting to fetch documentation
         await sendNotification({
@@ -74,22 +54,44 @@ export const setupMCPServer = (): McpServer => {
         
         const html = await response.text();
         
-        // Extract the main content (this is a simple extraction and may need refinement)
-        // For a real implementation, you might need a proper HTML parser
+        // Extract the main content
         const mainContentMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
         const mainContent = mainContentMatch ? mainContentMatch[1] : html;
         
-        // Clean up HTML tags (basic cleanup, could be improved)
-        const cleanContent = mainContent
-          .replace(/<[^>]*>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
+        let formattedContent;
+        
+        // Format content based on requested format
+        if (format === "html") {
+          formattedContent = mainContent;
+        } else if (format === "markdown") {
+          // Simple HTML to Markdown conversion (could be enhanced with an HTML-to-MD library)
+          formattedContent = mainContent
+            .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n\n')
+            .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n\n')
+            .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n\n')
+            .replace(/<h4[^>]*>(.*?)<\/h4>/gi, '#### $1\n\n')
+            .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n')
+            .replace(/<li[^>]*>(.*?)<\/li>/gi, '* $1\n')
+            .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
+            .replace(/<code[^>]*>(.*?)<\/code>/gi, '`$1`')
+            .replace(/<pre[^>]*>(.*?)<\/pre>/gi, '```\n$1\n```\n')
+            .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')
+            .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
+            .replace(/<[^>]*>/g, '')
+            .replace(/\n\s*\n\s*\n/g, '\n\n');
+        } else {
+          // Clean up HTML tags (text format)
+          formattedContent = mainContent
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
 
         return {
           content: [
             {
               type: "text",
-              text: `Documentation from ${url}:\n\n${cleanContent}`,
+              text: `Documentation from ${url}:\n\n${formattedContent}`,
             },
           ],
         };
@@ -113,8 +115,8 @@ export const setupMCPServer = (): McpServer => {
     "Browses and suggests Machina templates from the GitHub repository",
     {
       category: z
-        .enum(["all", "reporter", "sport-specific", "brand-specific", "general"])
-        .describe("The category of templates to browse (default is 'all')")
+        .string()
+        .describe("The category of templates to browse (all, reporter, sport-specific, brand-specific, general)")
         .default("all"),
       sport: z
         .string()
@@ -129,7 +131,7 @@ export const setupMCPServer = (): McpServer => {
         .describe("The language of the template (e.g., 'en', 'es', 'pt-br')")
         .optional(),
       content_type: z
-        .enum(["templates", "connectors", "both"])
+        .string()
         .describe("Whether to browse templates, connectors, or both")
         .default("both"),
       fetch_content: z
@@ -333,6 +335,14 @@ export const setupMCPServer = (): McpServer => {
           templates.forEach((template: any) => {
             const description = inferTemplateDescription(template.name);
             suggestions.push(`- ${template.name}: ${description}`);
+            
+            // Include template content if available
+            if (template.content) {
+              suggestions.push("\nTemplate content:");
+              suggestions.push("```yaml");
+              suggestions.push(template.content.substring(0, 800) + (template.content.length > 800 ? "...\n(content truncated)" : ""));
+              suggestions.push("```");
+            }
           });
         } else {
           suggestions.push("No templates found matching your criteria.");
@@ -344,6 +354,14 @@ export const setupMCPServer = (): McpServer => {
           connectors.forEach((connector: any) => {
             const description = inferConnectorDescription(connector.name);
             suggestions.push(`- ${connector.name}: ${description}`);
+            
+            // Include connector content if available
+            if (connector.content) {
+              suggestions.push("\nConnector definition:");
+              suggestions.push("```yaml");
+              suggestions.push(connector.content.substring(0, 800) + (connector.content.length > 800 ? "...\n(content truncated)" : ""));
+              suggestions.push("```");
+            }
           });
         }
 
@@ -375,223 +393,105 @@ export const setupMCPServer = (): McpServer => {
     }
   );
 
-  // Register a tool for converting Machina templates to custom agents
+  // Tool for generating new agent templates
   server.tool(
-    "convert-template-to-agent",
-    "Converts a Machina template to a customized agent configuration",
+    "generate-agent-template",
+    "Generates a new Machina agent template based on provided specifications",
     {
-      template_name: z
-        .string()
-        .describe("The name of the template to convert (e.g., 'soccer-match-recap-en')"),
-      agent_name: z
-        .string()
-        .describe("The name for the new agent"),
-      agent_description: z
-        .string()
-        .describe("A short description of the agent's purpose")
-        .optional(),
-      parameters: z
-        .record(z.any())
-        .describe("Custom parameters to apply to the template (format depends on the specific template)")
-        .optional(),
-      language: z
-        .string()
-        .describe("The language for the agent (e.g., 'en', 'es', 'pt-br')")
-        .default("en"),
-      output_format: z
-        .enum(["yaml", "json"])
-        .describe("The output format for the agent configuration")
-        .default("yaml"),
+      name: z.string().describe("Name of the template (e.g., 'soccer-recap-reporter')"),
+      description: z.string().describe("Description of what the agent does"),
+      sport: z.string().describe("Sport the agent is focused on (e.g., 'soccer', 'nba', 'nfl')"),
+      use_case: z.string().describe("Primary use case (e.g., 'recap', 'quiz', 'poll', 'prediction')"),
+      language: z.string().describe("Language of the agent (en, es, pt-br)").default("en"),
+      data_sources: z.string().describe("Comma-separated list of data sources/connectors").default(""),
+      output_format: z.string().describe("Output format (text, json, markdown, html)").default("text"),
+      include_examples: z.boolean().describe("Whether to include example prompts").default(true),
     },
-    async ({ template_name, agent_name, agent_description, parameters, language, output_format }, { sendNotification }): Promise<CallToolResult> => {
+    async ({ name, description, sport, use_case, language, data_sources, output_format, include_examples }): Promise<CallToolResult> => {
       try {
-        // Notify that we're starting the template conversion
-        await sendNotification({
-          method: "notifications/message",
-          params: {
-            level: "info",
-            data: `Starting conversion of template "${template_name}" to agent "${agent_name}"...`,
+        // Generate a sanitized template name if not provided
+        const templateName = name || `${sport}-${use_case}-${language}`;
+        
+        // Parse data sources
+        const dataSources = data_sources ? data_sources.split(',').map(s => s.trim()) : [];
+        
+        // Build the agent template object
+        const template = {
+          name: templateName,
+          description: description,
+          version: "1.0.0",
+          language: language,
+          sport: sport,
+          configuration: {
+            output_format: output_format,
+            use_case: use_case,
+            data_sources: dataSources.length > 0 ? dataSources : [`${sport}-data`, "web-search"],
           },
-        });
-
-        // GitHub API URLs for fetching repository content
-        const apiBaseUrl = "https://api.github.com/repos/machina-sports/machina-templates";
-        
-        // Function to fetch repository content
-        async function fetchRepoContent(path: string) {
-          const url = `${apiBaseUrl}/contents/${path}`;
-          const response = await fetch(url, {
-            headers: {
-              "Accept": "application/vnd.github.v3+json",
-              "User-Agent": "MachinaTemplateConverter"
-            }
-          });
-          
-          if (!response.ok) {
-            throw new Error(`Failed to fetch GitHub content for ${path}: ${response.statusText}`);
-          }
-          
-          return await response.json();
-        }
-
-        // Function to fetch file content
-        async function fetchFileContent(url: string) {
-          const response = await fetch(url, {
-            headers: {
-              "Accept": "application/vnd.github.v3.raw",
-              "User-Agent": "MachinaTemplateConverter"
-            }
-          });
-          
-          if (!response.ok) {
-            throw new Error(`Failed to fetch file content: ${response.statusText}`);
-          }
-          
-          return await response.text();
-        }
-
-        // Check if the template exists
-        await sendNotification({
-          method: "notifications/message",
-          params: {
-            level: "info",
-            data: `Searching for template "${template_name}"...`,
-          },
-        });
-
-        // Fetch all templates to find the requested one
-        const templatesList = await fetchRepoContent('agent-templates');
-        const templateMatch = templatesList.find((template: any) => 
-          template.name.toLowerCase() === template_name.toLowerCase());
-        
-        if (!templateMatch) {
-          throw new Error(`Template "${template_name}" not found. Please use the browse-machina-templates tool to find available templates.`);
-        }
-
-        await sendNotification({
-          method: "notifications/message",
-          params: {
-            level: "info",
-            data: `Template found! Fetching template files...`,
-          },
-        });
-
-        // Fetch template directory contents to find YAML/configuration files
-        const templateFiles = await fetchRepoContent(`agent-templates/${templateMatch.name}`);
-        const configFiles = templateFiles.filter((file: any) => 
-          file.name.endsWith('.yaml') || file.name.endsWith('.yml') || 
-          file.name.endsWith('.json'));
-        
-        if (configFiles.length === 0) {
-          throw new Error(`No configuration files found in template "${template_name}"`);
-        }
-
-        // Fetch the configuration file content
-        const configFile = configFiles[0]; // Take the first config file
-        const configContent = await fetchFileContent(configFile.download_url);
-        
-        await sendNotification({
-          method: "notifications/message",
-          params: {
-            level: "info",
-            data: `Analyzing template configuration...`,
-          },
-        });
-
-        // Determine if YAML or JSON and parse accordingly
-        let templateConfig: any;
-        let isYaml = false;
-        
-        if (configFile.name.endsWith('.yaml') || configFile.name.endsWith('.yml')) {
-          isYaml = true;
-          // For YAML parsing, we'll use a simple regex-based approach since we don't have a YAML library
-          // In a production environment, you would use a proper YAML library
-          templateConfig = parseSimpleYaml(configContent);
-        } else {
-          templateConfig = JSON.parse(configContent);
-        }
-
-        // Extract available parameters from the template
-        const availableParams = extractTemplateParameters(templateConfig);
-        
-        // Check if we need to request additional parameters from the user
-        if (availableParams.length > 0 && (!parameters || Object.keys(parameters).length === 0)) {
-          return {
-            content: [
+          prompts: {
+            system: `You are a specialized sports AI agent focusing on ${sport}. Your primary task is to ${description} in ${language === "en" ? "English" : language === "es" ? "Spanish" : "Brazilian Portuguese"}.`,
+            examples: include_examples ? [
               {
-                type: "text",
-                text: `Template "${template_name}" requires the following parameters:\n\n` +
-                      availableParams.map(param => `- ${param.name}: ${param.description || 'No description'}`).join('\n') + 
-                      `\n\nPlease call this tool again with the "parameters" field populated with values for these parameters.`,
+                role: "user",
+                content: `Generate a ${use_case} for the recent ${sport} match between Team A and Team B.`
               },
-            ],
-          };
-        }
-
-        await sendNotification({
-          method: "notifications/message",
-          params: {
-            level: "info",
-            data: `Applying customizations and generating agent configuration...`,
+              {
+                role: "assistant",
+                content: `I'll create a detailed ${use_case} for the ${sport} match between Team A and Team B.`
+              }
+            ] : [],
           },
-        });
-
-        // Apply user parameters to the template
-        const customizedConfig = applyParameters(templateConfig, parameters, {
-          name: agent_name,
-          description: agent_description || inferTemplateDescription(template_name),
-          language: language
-        });
-
-        // Convert the configuration to the requested output format
-        let outputConfig: string;
+          workflows: [
+            {
+              name: "default",
+              description: `Default workflow for ${use_case} generation`,
+              steps: [
+                {
+                  name: "fetch-data",
+                  type: "data-fetch",
+                  config: {
+                    source: dataSources[0] || `${sport}-data`,
+                  }
+                },
+                {
+                  name: "process-data",
+                  type: "data-processing",
+                  config: {
+                    format: "structured",
+                    fields: ["date", "teams", "scores", "key_events", "statistics"]
+                  }
+                },
+                {
+                  name: "generate-content",
+                  type: "content-generation",
+                  config: {
+                    format: output_format,
+                    max_length: 1000,
+                    include_statistics: true
+                  }
+                }
+              ]
+            }
+          ]
+        };
         
-        if (output_format === 'yaml' && !isYaml) {
-          outputConfig = convertJsonToYaml(customizedConfig);
-        } else if (output_format === 'json' && isYaml) {
-          outputConfig = JSON.stringify(customizedConfig, null, 2);
-        } else {
-          // Same format as input
-          outputConfig = isYaml ? 
-            convertJsonToYaml(customizedConfig) : 
-            JSON.stringify(customizedConfig, null, 2);
-        }
-
-        await sendNotification({
-          method: "notifications/message",
-          params: {
-            level: "info",
-            data: `Successfully created agent "${agent_name}" from template "${template_name}"!`,
-          },
-        });
-
-        // Return the generated agent configuration
+        // Convert to YAML
+        const yamlTemplate = yaml.dump(template, { indent: 2 });
+        
         return {
           content: [
             {
               type: "text",
-              text: `# ${agent_name} Agent Configuration\n` +
-                    `Generated from template: ${template_name}\n\n` +
-                    `## Configuration (${output_format.toUpperCase()}):\n\n` +
-                    "```" + output_format + "\n" +
-                    outputConfig + 
-                    "\n```\n\n" +
-                    "## Next Steps:\n" +
-                    "1. Save this configuration to a file named `" + agent_name.toLowerCase().replace(/\s+/g, '-') + "." + output_format + "`\n" +
-                    "2. Import the configuration into your Machina instance\n" +
-                    "3. Configure any required connectors\n" +
-                    "4. Test your new agent with sample data\n\n" +
-                    "For more information on deploying agents, visit: https://docs.machina.gg/deploy-sports-agent",
+              text: `# Generated ${sport} ${use_case} Agent Template\n\nHere's your new agent template for ${description}:\n\n\`\`\`yaml\n${yamlTemplate}\n\`\`\`\n\n## Usage Instructions\n\nSave this YAML to a file named \`${templateName}.yaml\` and import it into your Machina instance. Make sure you have the required connectors installed:\n\n${dataSources.map(ds => `- ${ds}`).join('\n') || "- No specific data sources required"}\n\nYou can customize this template further by adding more steps or modifying the prompts to better fit your specific needs.`,
             },
           ],
         };
       } catch (error: any) {
-        console.error("Error converting template to agent:", error);
+        console.error("Error generating agent template:", error);
         return {
           content: [
             {
               type: "text",
-              text: `Error converting template to agent: ${error.message || String(error)}`,
+              text: `Error generating agent template: ${error.message || String(error)}`,
             },
           ],
         };
@@ -599,242 +499,468 @@ export const setupMCPServer = (): McpServer => {
     }
   );
 
-  // Helper function to parse simple YAML (basic implementation)
-  function parseSimpleYaml(yamlString: string): any {
-    const result: any = {};
-    const lines = yamlString.split('\n');
-    let currentSection: any = result;
-    let sectionStack: any[] = [result];
-    let indentLevel = 0;
-    
-    for (const line of lines) {
-      // Skip comments and empty lines
-      if (line.trim().startsWith('#') || line.trim() === '') continue;
+  // Add a prompt template for common data analysis task: Game Recap Analysis
+  server.prompt(
+    "game-recap-analysis",
+    "Analyzes a sports game and generates a detailed recap",
+    {
+      sport: z.string().describe("The sport type (e.g., 'soccer', 'nba', 'nfl')"),
+      home_team: z.string().describe("Name of the home team"),
+      away_team: z.string().describe("Name of the away team"),
+      date: z.string().describe("Date of the game (YYYY-MM-DD)"),
+      home_score: z.string().describe("Score of the home team"),
+      away_score: z.string().describe("Score of the away team"),
+      key_events: z.string().describe("Key events during the game as a comma-separated list").optional(),
+      language: z.string().describe("Language for the recap (en, es, pt-br)").optional(),
+      style: z.string().describe("Style of the recap (neutral, home_fan, away_fan)").optional(),
+    },
+    async ({ sport, home_team, away_team, date, home_score, away_score, key_events, language, style }): Promise<GetPromptResult> => {
+      // Format key events
+      const eventsArray = key_events ? key_events.split(",").map(e => e.trim()) : [];
+      const events = eventsArray.length > 0 ? eventsArray.join("\n- ") : "No specific key events provided.";
       
-      // Calculate indentation level
-      const currentIndent = line.search(/\S/);
-      if (currentIndent === -1) continue; // Skip completely empty lines
+      // Convert scores to numbers for comparison, with defaults if undefined
+      const homeScoreNum = home_score ? parseInt(home_score, 10) : 0;
+      const awayScoreNum = away_score ? parseInt(away_score, 10) : 0;
+      const winner = homeScoreNum > awayScoreNum ? home_team : awayScoreNum > homeScoreNum ? away_team : "Neither team (it was a draw)";
       
-      // Handle indentation changes
-      if (currentIndent > indentLevel) {
-        indentLevel = currentIndent;
-      } else if (currentIndent < indentLevel) {
-        // Going back up in the hierarchy
-        const levelsUp = Math.floor((indentLevel - currentIndent) / 2);
-        for (let i = 0; i < levelsUp; i++) {
-          sectionStack.pop();
-        }
-        currentSection = sectionStack[sectionStack.length - 1];
-        indentLevel = currentIndent;
+      let styleGuidance = "Maintain a neutral, journalistic tone throughout the recap.";
+      if (style === "home_fan") {
+        styleGuidance = `Write from the perspective of a ${home_team} fan, with more enthusiasm for ${home_team}'s achievements.`;
+      } else if (style === "away_fan") {
+        styleGuidance = `Write from the perspective of an ${away_team} fan, with more enthusiasm for ${away_team}'s achievements.`;
       }
       
-      // Parse the current line
-      if (line.includes(':')) {
-        const [key, value] = line.split(':', 2).map(part => part.trim());
-        if (!key) continue;
+      const lang = language || "en";
+      const languagePrompt = lang === "en" ? "in English" : lang === "es" ? "in Spanish" : "in Brazilian Portuguese";
+      
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `You are a professional sports writer specializing in ${sport}. Write engaging and accurate game recaps based on provided information.
+              
+Create a detailed game recap ${languagePrompt} for the ${sport} game between ${home_team} (home) and ${away_team} (away) played on ${date}.
+
+Game result: ${home_team} ${home_score} - ${away_score} ${away_team}
+Winner: ${winner}
+
+Key events:
+- ${events}
+
+${styleGuidance}
+
+Include the following in your recap:
+1. An attention-grabbing headline
+2. A compelling introduction summarizing the game outcome
+3. Analysis of key moments and turning points
+4. Brief mention of standout players
+5. Concluding thoughts and what this result means for both teams going forward
+
+Keep your recap informative, engaging and suitable for sports fans.`,
+            },
+          },
+        ],
+      };
+    }
+  );
+
+  // Add a prompt template for common data analysis task: Player Performance Analysis
+  server.prompt(
+    "player-performance-analysis",
+    "Analyzes a player's performance and generates insights",
+    {
+      sport: z.string().describe("The sport type (e.g., 'soccer', 'nba', 'nfl')"),
+      player_name: z.string().describe("Name of the player to analyze"),
+      team: z.string().describe("Player's team"),
+      date_range: z.string().describe("Date range for analysis (e.g., '2023-01-01 to 2023-01-31')"),
+      statistics: z.string().describe("Key statistics as JSON string, e.g., '{\"points\":24,\"rebounds\":10}'"),
+      comparison: z.string().describe("Comparison to averages as JSON string (optional)").optional(),
+      analysis_depth: z.string().describe("Depth of analysis (basic, detailed, comprehensive)").optional(),
+      format: z.string().describe("Format of the analysis (text, bullet_points, structured_report)").optional(),
+    },
+    async ({ sport, player_name, team, date_range, statistics, comparison, analysis_depth, format }): Promise<GetPromptResult> => {
+      // Parse statistics from JSON string
+      let statsObj: Record<string, number> = {};
+      let comparisonObj: Record<string, number> = {};
+      
+      try {
+        statsObj = JSON.parse(statistics);
+      } catch (e) {
+        statsObj = { "error": 0 };
+        console.error("Failed to parse statistics JSON:", e);
+      }
+      
+      if (comparison) {
+        try {
+          comparisonObj = JSON.parse(comparison);
+        } catch (e) {
+          console.error("Failed to parse comparison JSON:", e);
+        }
+      }
+      
+      // Format statistics for the prompt
+      const statsDisplay = Object.entries(statsObj)
+        .map(([key, value]) => 
+          `- ${key}: ${value}${comparisonObj[key] ? ` (${comparisonObj[key] > 0 ? '+' : ''}${comparisonObj[key]}% vs avg)` : ''}`)
+        .join('\n');
+      
+      let formatInstructions = "Write your analysis as a cohesive narrative text.";
+      if (format === "bullet_points") {
+        formatInstructions = "Format your analysis as bullet points with clear sections.";
+      } else if (format === "structured_report") {
+        formatInstructions = "Structure your analysis as a formal report with sections for Summary, Methodology, Findings, and Recommendations.";
+      }
+      
+      let depthInstructions = "Provide a detailed analysis with meaningful insights on strengths, weaknesses, and notable patterns.";
+      if (analysis_depth === "basic") {
+        depthInstructions = "Provide a basic overview of the player's performance.";
+      } else if (analysis_depth === "comprehensive") {
+        depthInstructions = "Deliver a comprehensive, in-depth analysis with detailed statistical breakdown, historical context, and nuanced interpretation of the player's performance.";
+      }
+      
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `You are a professional sports analyst specializing in ${sport}. Your task is to analyze player performance data and provide insightful, data-driven analysis.
+              
+Analyze the performance of ${player_name} from ${team} during the period ${date_range}.
+
+Player statistics:
+${statsDisplay}
+
+${depthInstructions}
+${formatInstructions}
+
+Your analysis should include:
+1. An assessment of overall performance
+2. Identification of strengths and weaknesses
+3. Comparison to expectations and historical performance
+4. Context within team dynamics
+5. Actionable insights or recommendations
+
+Make your analysis valuable for coaches, fans, and sports analysts.`,
+            },
+          },
+        ],
+      };
+    }
+  );
+
+  // Add a prompt template for common data analysis task: Team Trend Analysis
+  server.prompt(
+    "team-trend-analysis",
+    "Analyzes team performance trends over time",
+    {
+      sport: z.string().describe("The sport type (e.g., 'soccer', 'nba', 'nfl')"),
+      team_name: z.string().describe("Name of the team to analyze"),
+      period: z.string().describe("Time period for analysis (e.g., 'Last 10 games', '2023 season')"),
+      results_json: z.string().describe("Recent game results as JSON string array"),
+      metrics_json: z.string().describe("Key metrics as JSON string (optional)").optional(),
+      focus_areas: z.string().describe("Specific areas to focus on, comma-separated").optional(),
+      language: z.string().describe("Language for analysis (en, es, pt-br)").optional(),
+    },
+    async ({ sport, team_name, period, results_json, metrics_json, focus_areas, language }): Promise<GetPromptResult> => {
+      // Parse results from JSON string
+      let results: Array<{date: string, opponent: string, result: string, score: string}> = [];
+      let metrics: Record<string, number[]> = {};
+      
+      try {
+        results = JSON.parse(results_json);
+      } catch (e) {
+        console.error("Failed to parse results JSON:", e);
+        results = [{ date: "unknown", opponent: "unknown", result: "unknown", score: "unknown" }];
+      }
+      
+      if (metrics_json) {
+        try {
+          metrics = JSON.parse(metrics_json);
+        } catch (e) {
+          console.error("Failed to parse metrics JSON:", e);
+        }
+      }
+      
+      // Format results and metrics
+      const resultsDisplay = results.map(game => 
+        `- ${game.date}: ${team_name} vs ${game.opponent} - ${game.result} (${game.score})`
+      ).join('\n');
+      
+      let metricsDisplay = "";
+      if (Object.keys(metrics).length > 0) {
+        metricsDisplay = "Performance metrics over time:\n" + 
+          Object.entries(metrics)
+            .map(([metric, values]) => `- ${metric}: ${values.join(', ')}`)
+            .join('\n');
+      }
+      
+      const focusAreasArray = focus_areas ? focus_areas.split(',').map(area => area.trim()) : [];
+      const focusAreasDisplay = focusAreasArray.length > 0 
+        ? `\nFocus on these specific areas in your analysis:\n${focusAreasArray.map(area => `- ${area}`).join('\n')}`
+        : "";
+      
+      const lang = language || "en";
+      const languagePrompt = lang === "en" ? "in English" : lang === "es" ? "in Spanish" : "in Brazilian Portuguese";
+      
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `You are a professional sports analyst specializing in ${sport}. Your expertise is identifying patterns and trends in team performance over time.
+              
+Analyze the performance trends of ${team_name} during ${period} ${languagePrompt}.
+
+Recent results:
+${resultsDisplay}
+
+${metricsDisplay}
+${focusAreasDisplay}
+
+Provide a comprehensive trend analysis that includes:
+1. Overall performance trajectory (improving, declining, or stable)
+2. Patterns in wins and losses
+3. Statistical trends and what they reveal
+4. Changes in team strategy or style of play
+5. Factors potentially influencing performance changes
+6. Predictions for future performance based on identified trends
+
+Your analysis should be insightful, backed by the data provided, and valuable for coaches, management, and fans.`,
+            },
+          },
+        ],
+      };
+    }
+  );
+
+  // Add a prompt template for fan engagement content creation
+  server.prompt(
+    "fan-engagement-content",
+    "Creates engaging fan content for sports events",
+    {
+      sport: z.string().describe("The sport type (e.g., 'soccer', 'nba', 'nfl')"),
+      team: z.string().describe("Primary team to focus on"),
+      event_type: z.string().describe("Type of event (e.g., 'matchday', 'draft', 'season-preview')"),
+      content_format: z.string().describe("Content format (e.g., 'quiz', 'poll', 'prediction', 'newsletter')"),
+      stats_json: z.string().describe("Recent statistics as JSON string (optional)").optional(),
+      tone: z.string().describe("Content tone (e.g., 'casual', 'analytical', 'enthusiastic')").optional(),
+      target_audience: z.string().describe("Target audience (e.g., 'hardcore-fans', 'casual-viewers', 'new-fans')").optional(),
+    },
+    async ({ sport, team, event_type, content_format, stats_json, tone, target_audience }): Promise<GetPromptResult> => {
+      // Parse stats if provided
+      let stats: Record<string, any> = {};
+      
+      if (stats_json) {
+        try {
+          stats = JSON.parse(stats_json);
+        } catch (e) {
+          console.error("Failed to parse stats JSON:", e);
+        }
+      }
+      
+      // Set defaults for optional parameters
+      const contentTone = tone || "enthusiastic";
+      const audience = target_audience || "hardcore-fans";
+      const format = content_format || "general";
+      
+      // Match content format to available templates
+      let templateReference = "";
+      let connectorReference = "";
+      
+      // Match content format to actual templates
+      if (format === "quiz" || format.includes("quiz")) {
+        templateReference = "Use the reporter-quizzes-en template for structured quiz creation";
+        connectorReference = "Consider using the sportradar connectors for accurate sports data";
+      } else if (format === "poll" || format.includes("poll")) {
+        templateReference = "Follow the reporter-polls-en template structure for compelling poll options";
+        connectorReference = "The sportradar connectors can provide factual data for poll options";
+      } else if (format === "recap" || format.includes("recap")) {
+        templateReference = "The reporter-recap template offers a framework for post-game analysis";
+        connectorReference = "Integrate with the appropriate sportradar connector based on the sport";
+      } else if (format === "image" || format.includes("image")) {
+        templateReference = "Utilize the reporter-image template for generating visual content";
+        connectorReference = "The stability connector can be used for image generation"; 
+      } else if (format === "newsletter" || format.includes("newsletter")) {
+        templateReference = "The personalized-fan-newsletter template provides a structure for periodic updates";
+        connectorReference = "Combine multiple connectors for a data-rich newsletter";
+      } else if (format === "podcast" || format.includes("podcast")) {
+        templateReference = "Base your script on the personalized-sports-podcast or nfl-podcast-generator templates";
+        connectorReference = "The elevenlabs connector can assist with audio generation";
+      } else if (format === "gameday" || format.includes("gameday")) {
+        templateReference = "Use the gameday-fan-engagement or gameday-ai-companion templates";
+        connectorReference = "Real-time data connectors like sportradar are essential for gameday content";
+      } else if (format === "fantasy" || format.includes("fantasy")) {
+        templateReference = "The fantasy-draft-assistant template offers structures for fantasy sports content";
+        connectorReference = "Sport-specific connectors provide the statistics needed for fantasy analysis";
+      } else {
+        templateReference = "For general content, the chat-completion template can be adapted to your needs";
+        connectorReference = "Choose a sport-specific connector like sportradar to incorporate relevant data";
+      }
+      
+      // Audience adjustment tips
+      let audienceTips = "";
+      if (audience === "hardcore-fans") {
+        audienceTips = "Use advanced statistics, detailed analysis, and sport-specific terminology";
+      } else if (audience === "casual-viewers") {
+        audienceTips = "Focus on storytelling, explain technical terms, and highlight interesting narratives";
+      } else if (audience === "new-fans") {
+        audienceTips = "Provide context about the sport, explain rules when relevant, and focus on excitement";
+      } else {
+        audienceTips = "Balance statistical insights with engaging storytelling";
+      }
+      
+      // Create stats display if available
+      let statsDisplay = "";
+      if (Object.keys(stats).length > 0) {
+        statsDisplay = "Recent statistics:\n" + 
+          Object.entries(stats)
+            .map(([key, value]) => `- ${key}: ${value}`)
+            .join('\n');
+      }
+      
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `You are a content creator for ${team}, a ${sport} team. You need to create engaging ${format} content for ${event_type} with a ${contentTone} tone.
+
+Template Reference: ${templateReference}
+Connector Reference: ${connectorReference}
+Audience: ${audience} - ${audienceTips}
+
+${statsDisplay ? statsDisplay + "\n\n" : ""}
+Create compelling ${format} content that:
+1. Engages fans and encourages interaction
+2. Uses accurate and relevant data about ${team}
+3. Fits the ${event_type} context appropriately
+4. Maintains a ${contentTone} tone throughout
+5. Includes appropriate calls to action
+
+Your content should be immediately usable in a social media or fan engagement campaign.`,
+            },
+          },
+        ],
+      };
+    }
+  );
+
+  // Add a prompt template for data-driven sport insights
+  server.prompt(
+    "sport-data-insights",
+    "Generates insights from sports data using appropriate connectors",
+    {
+      sport: z.string().describe("The sport type (e.g., 'soccer', 'nba', 'nfl', 'f1')"),
+      data_source: z.string().describe("Data source connector (e.g., 'sportradar-nba', 'fastf1', 'mlb-statsapi')"),
+      analysis_type: z.string().describe("Type of analysis (e.g., 'player-comparison', 'team-trends', 'season-projection')"),
+      time_period: z.string().describe("Time period to analyze (e.g., 'last-game', '10-games', 'season')"),
+      entities_json: z.string().describe("Players/teams to analyze as JSON array").optional(),
+      metrics: z.string().describe("Specific metrics to focus on (comma-separated)").optional(),
+      output_format: z.string().describe("Output format (text, json, markdown, html)").default("text"),
+    },
+    async ({ sport, data_source, analysis_type, time_period, entities_json, metrics, output_format }): Promise<GetPromptResult> => {
+      // Parse entities if provided
+      let entities: string[] = [];
+      
+      if (entities_json) {
+        try {
+          entities = JSON.parse(entities_json);
+        } catch (e) {
+          console.error("Failed to parse entities JSON:", e);
+          entities = [];
+        }
+      }
+      
+      // Determine connector-specific language
+      let connectorContext = "";
+      let analysisGuidance = "";
+      
+      // Match data source to actual connectors
+      if (data_source.includes("sportradar")) {
+        const sportType = data_source.split('-')[1] || sport;
+        connectorContext = `The ${data_source} connector provides comprehensive ${sportType.toUpperCase()} data including player statistics, team performance, and game events.`;
         
-        if (!value || value === '') {
-          // This is a new section
-          currentSection[key] = {};
-          sectionStack.push(currentSection[key]);
-          currentSection = currentSection[key];
-        } else {
-          // This is a key-value pair
-          // Handle quoted values
-          if ((value.startsWith('"') && value.endsWith('"')) || 
-              (value.startsWith("'") && value.endsWith("'"))) {
-            currentSection[key] = value.substring(1, value.length - 1);
-          } 
-          // Handle boolean values
-          else if (value === 'true' || value === 'false') {
-            currentSection[key] = value === 'true';
-          } 
-          // Handle numeric values
-          else if (!isNaN(Number(value))) {
-            currentSection[key] = Number(value);
-          } 
-          // Handle null values
-          else if (value === 'null') {
-            currentSection[key] = null;
-          } 
-          // Handle arrays
-          else if (value.startsWith('[') && value.endsWith(']')) {
-            try {
-              currentSection[key] = JSON.parse(value);
-            } catch (e) {
-              currentSection[key] = value; // fallback to string if parsing fails
-            }
-          } 
-          // Default to string
-          else {
-            currentSection[key] = value;
-          }
+        if (sportType === "nba") {
+          analysisGuidance = "Consider both traditional stats (points, rebounds, assists) and advanced metrics (PER, true shooting percentage, etc.)";
+        } else if (sportType === "nfl") {
+          analysisGuidance = "For NFL analysis, focus on situational statistics, efficiency metrics, and contextual performance";
+        } else if (sportType === "mlb") {
+          analysisGuidance = "MLB analysis should consider sabermetrics like OPS, WAR, and ERA+ for deeper insights";
+        } else if (sportType === "soccer") {
+          analysisGuidance = "For soccer, consider possession metrics, expected goals (xG), and defensive contributions";
         }
-      } else if (line.trim().startsWith('-')) {
-        // This is a list item, but we'll handle it simply for now
-        const listItem = line.trim().substring(1).trim();
-        if (!currentSection.items) {
-          currentSection.items = [];
-        }
-        currentSection.items.push(listItem);
-      }
-    }
-    
-    return result;
-  }
-
-  // Helper function to convert JSON to a simple YAML format
-  function convertJsonToYaml(json: any, indent: number = 0): string {
-    const indentStr = ' '.repeat(indent);
-    let yamlStr = '';
-    
-    if (typeof json !== 'object' || json === null) {
-      // For primitive values
-      if (typeof json === 'string') {
-        // Check if we need quotes (special characters or spaces)
-        if (json.includes('\n') || json.includes(':') || json.includes('#') || 
-            json.trim() !== json || json === '') {
-          yamlStr += `"${json.replace(/"/g, '\\"')}"`;
-        } else {
-          yamlStr += json;
-        }
+      } else if (data_source.includes("fastf1")) {
+        connectorContext = "The fastf1 connector provides Formula 1 racing data including lap times, tire strategies, and car telemetry.";
+        analysisGuidance = "F1 analysis should consider factors like tire degradation, track position, and race strategy";
+      } else if (data_source.includes("statsapi")) {
+        connectorContext = "The mlb-statsapi connector offers detailed baseball statistics and play-by-play information.";
+        analysisGuidance = "Consider traditional and advanced statistics to provide a comprehensive view of performance";
+      } else if (data_source.includes("tallysight")) {
+        connectorContext = "The tallysight connector provides sports predictions and betting insights across multiple sports.";
+        analysisGuidance = "Focus on probability-based analysis and prediction accuracy metrics";
       } else {
-        yamlStr += String(json);
+        connectorContext = `The ${data_source} connector provides specialized data for ${sport} analysis.`;
+        analysisGuidance = "Focus on the most relevant metrics for your specific analysis goals";
       }
-    } else if (Array.isArray(json)) {
-      // For arrays
-      if (json.length === 0) {
-        yamlStr += '[]';
-      } else {
-        for (const item of json) {
-          yamlStr += `\n${indentStr}- `;
-          
-          if (typeof item === 'object' && item !== null) {
-            // For nested objects in arrays, increase indentation
-            const nestedYaml = convertJsonToYaml(item, indent + 2);
-            if (nestedYaml.startsWith('\n')) {
-              yamlStr += nestedYaml.substring(1); // Skip the first newline
-            } else {
-              yamlStr += nestedYaml;
-            }
-          } else {
-            yamlStr += convertJsonToYaml(item, 0); // No indentation for primitives
-          }
-        }
-      }
-    } else {
-      // For objects
-      const keys = Object.keys(json);
-      if (keys.length === 0) {
-        yamlStr += '{}';
-      } else {
-        for (const key of keys) {
-          const value = json[key];
-          yamlStr += `\n${indentStr}${key}: `;
-          
-          if (typeof value === 'object' && value !== null) {
-            // For nested objects, increase indentation
-            const nestedYaml = convertJsonToYaml(value, indent + 2);
-            if (nestedYaml.startsWith('\n')) {
-              yamlStr += nestedYaml; // Keep the first newline
-            } else {
-              yamlStr += nestedYaml;
-            }
-          } else {
-            yamlStr += convertJsonToYaml(value, 0); // No indentation for primitives
-          }
-        }
-      }
-    }
-    
-    return yamlStr;
-  }
+      
+      // Format metrics
+      const metricsList = metrics ? metrics.split(',').map(m => m.trim()).join(', ') : "all relevant metrics";
+      
+      // Format entities
+      const entitiesDisplay = entities.length > 0 
+        ? `Entities to analyze: ${entities.join(', ')}`
+        : "Analyze all relevant entities in the dataset";
+      
+      const outputGuidance = output_format === 'json' 
+        ? "Provide a structured JSON response with clearly labeled metrics and insights."
+        : output_format === 'markdown' 
+        ? "Format your response with Markdown for headings, lists, and emphasis."
+        : output_format === 'html'
+        ? "Structure your response with appropriate HTML tags for web display."
+        : "Provide a clear, well-organized text response.";
+      
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `You are a data analyst specializing in ${sport}. Generate insights using data from the ${data_source} connector.
 
-  // Extract parameter definitions from a template configuration
-  function extractTemplateParameters(config: any): Array<{ name: string, description: string }> {
-    const parameters: Array<{ name: string, description: string }> = [];
-    
-    // This function recursively scans the configuration object for parameter placeholders
-    function scanForParameters(obj: any, path: string = '') {
-      if (!obj || typeof obj !== 'object') return;
-      
-      // Check if this is an array
-      if (Array.isArray(obj)) {
-        obj.forEach((item, index) => {
-          scanForParameters(item, `${path}[${index}]`);
-        });
-        return;
-      }
-      
-      // Look for objects with parameter definitions
-      if (obj.type === 'parameter' || obj.__placeholder === true) {
-        parameters.push({
-          name: path || obj.name || 'unknown',
-          description: obj.description || `Parameter for ${path}`
-        });
-        return;
-      }
-      
-      // Recursively scan object properties
-      for (const key in obj) {
-        scanForParameters(obj[key], path ? `${path}.${key}` : key);
-      }
-    }
-    
-    scanForParameters(config);
-    
-    return parameters;
-  }
+${connectorContext}
 
-  // Apply parameters to the template configuration
-  function applyParameters(config: any, userParams: any = {}, agentInfo: { name: string, description: string, language: string }): any {
-    // Create a deep copy of the config
-    const result = JSON.parse(JSON.stringify(config));
-    
-    // Set basic agent properties if present in the configuration
-    if (result.name !== undefined) {
-      result.name = agentInfo.name;
+Analysis parameters:
+- Type: ${analysis_type}
+- Time period: ${time_period}
+- ${entitiesDisplay}
+- Metrics: ${metricsList}
+
+Analysis guidance:
+${analysisGuidance}
+
+Output instructions:
+${outputGuidance}
+
+Your analysis should:
+1. Identify clear patterns and insights from the data
+2. Provide context to make the insights meaningful
+3. Use appropriate statistical terminology
+4. Highlight unexpected or counterintuitive findings
+5. Suggest actionable recommendations based on the data
+
+Structure your analysis to be comprehensive yet accessible, with a clear flow from data observations to meaningful conclusions.`,
+            },
+          },
+        ],
+      };
     }
-    
-    if (result.description !== undefined) {
-      result.description = agentInfo.description;
-    }
-    
-    // This function recursively replaces parameter placeholders with user values
-    function replaceParameters(obj: any): any {
-      if (!obj || typeof obj !== 'object') return obj;
-      
-      // Handle arrays
-      if (Array.isArray(obj)) {
-        return obj.map(item => replaceParameters(item));
-      }
-      
-      // Check if this is a parameter placeholder
-      if (obj.type === 'parameter' || obj.__placeholder === true) {
-        const paramName = obj.name || '';
-        if (userParams && userParams[paramName] !== undefined) {
-          // If this is a complex parameter with children, merge rather than replace
-          if (typeof userParams[paramName] === 'object' && typeof obj.default === 'object') {
-            return {
-              ...obj.default,
-              ...userParams[paramName]
-            };
-          }
-          return userParams[paramName];
-        }
-        return obj.default !== undefined ? obj.default : obj;
-      }
-      
-      // Process regular objects
-      const newObj: any = {};
-      for (const key in obj) {
-        newObj[key] = replaceParameters(obj[key]);
-      }
-      return newObj;
-    }
-    
-    return replaceParameters(result);
-  }
+  );
 
   // Create a resource that provides information about available documentation
   server.resource(
@@ -870,18 +996,17 @@ export const setupMCPServer = (): McpServer => {
                 languages: ["en", "es", "pt-br"],
                 contentTypes: ["templates", "connectors", "both"]
               },
-              templateToAgent: {
-                description: "Machina Template to Agent Conversion Tool",
-                tool: "convert-template-to-agent",
-                requiredParameters: ["template_name", "agent_name"],
-                optionalParameters: ["agent_description", "parameters", "language", "output_format"],
-                supportedOutputFormats: ["yaml", "json"],
-                workflow: [
-                  "Browse available templates using browse-machina-templates",
-                  "Select a template and provide a name for your new agent",
-                  "Customize parameters specific to the template",
-                  "Generate agent configuration in YAML or JSON format"
-                ]
+              generatorTool: {
+                description: "Machina Agent Template Generator Tool",
+                tool: "generate-agent-template",
+                sports: ["soccer", "nba", "nfl", "rugby", "tennis", "golf", "f1"],
+                useCases: ["recap", "preview", "prediction", "analysis", "quiz", "poll", "image", "summary", "social"],
+                languages: ["en", "es", "pt-br"],
+                outputFormats: ["text", "json", "markdown", "html"]
+              },
+              analysisPrompts: {
+                description: "Analysis Prompt Templates",
+                prompts: ["game-recap-analysis", "player-performance-analysis", "team-trend-analysis"]
               }
             }, null, 2),
           },
