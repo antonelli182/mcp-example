@@ -64,4 +64,13 @@ npx @modelcontextprotocol/inspector npx mcp-remote@next http://localhost:8888/mc
 
 ```
 
+## Agent creation wizard
+
+This example exposes a new prompt named `agent-creation-wizard`. It walks you through
+the questions needed to generate a custom Machina agent template. After answering
+each question, the wizard calls the `generate-agent-template` tool and returns a
+ready-to-use YAML definition.
+
+If you're unsure which connectors are available, simply ask during the wizard. It will list suggestions by calling the `browse-machina-templates` tool with `content_type=connectors`.
+
 

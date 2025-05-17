@@ -499,6 +499,37 @@ export const setupMCPServer = (): McpServer => {
     }
   );
 
+  // Prompt that guides a user through creating a new agent template
+  server.prompt(
+    "agent-creation-wizard",
+    "Step-by-step wizard for building a custom Machina agent template",
+    {},
+    async (): Promise<GetPromptResult> => {
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `You are an interactive assistant that helps users create a new Machina agent template.\n\n` +
+                    `Guide the user through the following questions one at a time and wait for their answer after each:\n` +
+                    `1. Name of the agent template.\n` +
+                    `2. Short description of what the agent does.\n` +
+                    `3. Sport focus (e.g., soccer, nba, nfl).\n` +
+                    `4. Primary use case (e.g., recap, quiz, poll).\n` +
+                    `5. Preferred language (en, es, pt-br).\n` +
+                    `6. Required data sources or connectors (comma-separated). If you're unsure what connectors exist, ask me to list them and I'll fetch suggestions.\n` +
+                    `7. Desired output format (text, json, markdown, html).\n` +
+                    `8. Include example prompts? (yes or no).\n\n` +
+                    `After collecting all answers, confirm the details with the user then call the \"generate-agent-template\" tool using the gathered parameters.\n` +
+                    `Return the generated YAML template and offer further customization if needed.`
+            }
+          }
+        ]
+      };
+    }
+  );
+
   // Add a prompt template for common data analysis task: Game Recap Analysis
   server.prompt(
     "game-recap-analysis",
