@@ -18,5 +18,8 @@
         "node-fetch": "^2.6.7",
         "serverless-http": "^3.2.0",
         "zod": "^3.24.3"
+    },
+    "devDependencies": {
+        "typescript": "^5.8.3"
     }
 }

@@ -2377,5 +2377,1492 @@ Your complete agent solution is ready for deployment! 🎉`,
 - Test concurrent request handling`;
   }
 
+  // Register a tool for connector inspection
+  server.tool(
+    "inspect-connector",
+    "Inspects connector capabilities to understand available commands, schemas, and models",
+    {
+      connector_name: z
+        .string()
+        .describe("Name of the connector to inspect"),
+      list_commands: z
+        .boolean()
+        .describe("List all available commands")
+        .default(true),
+      get_command_schema: z
+        .string()
+        .describe("Get schema for specific command")
+        .optional(),
+      list_models: z
+        .boolean()
+        .describe("List AI models for AI connectors")
+        .default(false),
+    },
+    async ({ connector_name, list_commands, get_command_schema, list_models }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Inspecting connector: ${connector_name}...`,
+          },
+        });
+
+        // Known models for different AI connectors
+        const knownModels: Record<string, string[]> = {
+          "openai": ["gpt-4o", "gpt-4", "gpt-3.5-turbo", "text-embedding-3-small", "text-embedding-3-large"],
+          "groq": ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"],
+          "google-vertex": ["gemini-pro", "gemini-ultra", "text-bison"],
+          "perplexity": ["sonar-small-online", "sonar-medium-online"],
+          "stability": ["stable-diffusion-xl-1024-v1-0", "stable-diffusion-xl-beta-v2-2-2"]
+        };
+
+        // Connector information based on known connectors
+        const connectorInfo = getConnectorInfo(connector_name);
+        
+        if (!connectorInfo) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: Connector '${connector_name}' not found. Available connectors include: sportradar-soccer, sportradar-nba, sportradar-nfl, openai, groq, stability, perplexity, and others.`,
+              },
+            ],
+          };
+        }
+
+        let result = `# Connector Inspection: ${connector_name}\n\n`;
+        result += `**Type**: ${connectorInfo.type}\n`;
+        result += `**Description**: ${connectorInfo.description}\n`;
+        result += `**Requires API Key**: ${connectorInfo.requiresApiKey ? 'Yes' : 'No'}\n\n`;
+
+        if (list_commands && connectorInfo.commands) {
+          result += `## Available Commands\n\n`;
+          connectorInfo.commands.forEach((cmd: any) => {
+            result += `### ${cmd.name}\n`;
+            result += `- **Description**: ${cmd.description}\n`;
+            result += `- **Parameters**: ${cmd.parameters.join(', ')}\n\n`;
+          });
+        }
+
+        if (get_command_schema && connectorInfo.commands) {
+          const command = connectorInfo.commands.find((cmd: any) => cmd.name === get_command_schema);
+          if (command) {
+            result += `## Command Schema: ${get_command_schema}\n\n`;
+            result += `**Schema**: ${JSON.stringify(command.schema, null, 2)}\n\n`;
+          }
+        }
+
+        if (list_models && knownModels[connector_name]) {
+          result += `## Available Models\n\n`;
+          knownModels[connector_name].forEach(model => {
+            result += `- ${model}\n`;
+          });
+          result += '\n';
+        }
+
+        if (connectorInfo.supportedSports) {
+          result += `## Supported Sports\n\n`;
+          connectorInfo.supportedSports.forEach((sport: string) => {
+            result += `- ${sport}\n`;
+          });
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error inspecting connector:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error inspecting connector: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Register a tool for generating data mappings
+  server.tool(
+    "generate-mapping",
+    "Auto-generates mappings between data structures using intelligent field matching",
+    {
+      source_schema: z
+        .object({})
+        .describe("Source data structure schema")
+        .passthrough(),
+      target_schema: z
+        .object({})
+        .describe("Target data structure schema")
+        .passthrough(),
+      mapping_name: z
+        .string()
+        .describe("Name for the generated mapping")
+        .default("generated-mapping"),
+      field_mappings: z
+        .record(z.string())
+        .describe("Explicit field mappings (target_field: source_field)")
+        .default({}),
+    },
+    async ({ source_schema, target_schema, mapping_name, field_mappings }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Generating mapping: ${mapping_name}...`,
+          },
+        });
+
+        // Analyze field compatibility
+        const autoMappings = analyzeFieldCompatibility(source_schema, target_schema);
+        const finalMappings = { ...autoMappings, ...field_mappings };
+
+        // Generate mapping YAML structure
+        const mappingConfig = {
+          mapping: {
+            name: mapping_name,
+            title: `Auto-generated mapping for ${mapping_name}`,
+            description: "Automatically generated mapping between data structures",
+            fields: {} as Record<string, any>
+          }
+        };
+
+        // Build field mappings with JSONPath expressions
+        Object.entries(finalMappings).forEach(([targetField, sourceField]) => {
+          mappingConfig.mapping.fields[targetField] = {
+            path: `$.get('${sourceField}')`,
+            type: inferFieldType(source_schema, sourceField),
+            required: isFieldRequired(target_schema, targetField)
+          };
+        });
+
+        // Generate transformations for common patterns
+        mappingConfig.mapping.fields = {
+          ...mappingConfig.mapping.fields,
+          ...generateTransformations(source_schema, target_schema, finalMappings)
+        };
+
+        const unmappedFields = Object.keys((target_schema as any).properties || {})
+          .filter(field => !finalMappings[field]);
+
+        const yamlOutput = yaml.dump(mappingConfig, { indent: 2 });
+
+        let result = `# Generated Mapping: ${mapping_name}\n\n`;
+        result += `## Mapping Configuration\n\n\`\`\`yaml\n${yamlOutput}\n\`\`\`\n\n`;
+        result += `## Mapping Summary\n\n`;
+        result += `- **Mapped fields**: ${Object.keys(finalMappings).length}\n`;
+        result += `- **Total target fields**: ${Object.keys((target_schema as any).properties || {}).length}\n`;
+        
+        if (unmappedFields.length > 0) {
+          result += `- **Unmapped target fields**: ${unmappedFields.join(', ')}\n`;
+        }
+
+        result += `\n## Field Mappings\n\n`;
+        Object.entries(finalMappings).forEach(([target, source]) => {
+          result += `- **${target}** ← \`${source}\`\n`;
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error generating mapping:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error generating mapping: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Register a tool for generating prompt schemas
+  server.tool(
+    "generate-prompt-schema",
+    "Generates optimal prompt schemas from requirements for different use cases",
+    {
+      use_case: z
+        .string()
+        .describe("What the prompt should accomplish (chat, content, summary, analysis, quiz, poll, image, prediction)")
+        .default("general"),
+      output_format: z
+        .enum(["structured", "markdown", "json", "text"])
+        .describe("Expected output format")
+        .default("structured"),
+      required_fields: z
+        .array(z.string())
+        .describe("Required fields in output")
+        .default([]),
+      model: z
+        .string()
+        .describe("Target AI model")
+        .default("gpt-4o"),
+    },
+    async ({ use_case, output_format, required_fields, model }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Generating prompt schema for ${use_case}...`,
+          },
+        });
+
+        // Get base schema for use case
+        const baseSchema = getSchemaForUseCase(use_case);
+        
+        // Customize schema based on requirements
+        let finalSchema = baseSchema;
+        if (required_fields.length > 0) {
+          finalSchema = enhanceSchemaWithFields(baseSchema, required_fields, output_format);
+        }
+
+        // Optimize for specific model
+        finalSchema = optimizeSchemaForModel(finalSchema, model);
+
+        // Generate complete prompt configuration
+        const promptConfig = {
+          prompts: [{
+            type: "prompt",
+            title: `${use_case.charAt(0).toUpperCase() + use_case.slice(1)} Prompt`,
+            name: `${use_case.toLowerCase().replace(/\s+/g, '-')}-prompt`,
+            description: `Optimized prompt for ${use_case}`,
+            schema: finalSchema
+          }]
+        };
+
+        const yamlOutput = yaml.dump(promptConfig, { indent: 2 });
+        const estimatedTokens = estimateSchemaTokenUsage(finalSchema);
+
+        let result = `# Generated Prompt Schema: ${use_case}\n\n`;
+        result += `## Prompt Configuration\n\n\`\`\`yaml\n${yamlOutput}\n\`\`\`\n\n`;
+        result += `## Schema Details\n\n`;
+        result += `- **Use Case**: ${use_case}\n`;
+        result += `- **Output Format**: ${output_format}\n`;
+        result += `- **Target Model**: ${model}\n`;
+        result += `- **Estimated Token Usage**: ~${estimatedTokens} tokens\n\n`;
+
+        if (required_fields.length > 0) {
+          result += `## Required Fields\n\n`;
+          required_fields.forEach(field => {
+            result += `- ${field}\n`;
+          });
+        }
+
+        result += `\n## Schema Optimizations\n\n`;
+        result += `- Optimized for ${model} capabilities\n`;
+        result += `- Structured for ${output_format} output\n`;
+        result += `- Includes field validation and constraints\n`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error generating prompt schema:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error generating prompt schema: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Register a tool for workflow optimization
+  server.tool(
+    "optimize-workflow",
+    "Optimizes workflow structure for performance, cost, or balanced goals",
+    {
+      workflow_yaml: z
+        .string()
+        .describe("Workflow YAML to optimize"),
+      optimization_goal: z
+        .enum(["speed", "cost", "balanced"])
+        .describe("Optimization goal")
+        .default("balanced"),
+      merge_tasks: z
+        .boolean()
+        .describe("Merge compatible tasks")
+        .default(true),
+      parallelize: z
+        .boolean()
+        .describe("Identify parallelizable tasks")
+        .default(true),
+    },
+    async ({ workflow_yaml, optimization_goal, merge_tasks, parallelize }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: `Optimizing workflow for ${optimization_goal}...`,
+          },
+        });
+
+        let workflow;
+        try {
+          workflow = yaml.load(workflow_yaml) as any;
+        } catch {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Error: Invalid workflow YAML provided",
+              },
+            ],
+          };
+        }
+
+        const optimizations: string[] = [];
+        let optimizedWorkflow = JSON.parse(JSON.stringify(workflow));
+
+        // 1. Remove redundant document searches
+        if (merge_tasks) {
+          const { workflow: mergedWorkflow, mergedCount } = mergeDocumentSearches(optimizedWorkflow);
+          optimizedWorkflow = mergedWorkflow;
+          if (mergedCount > 0) {
+            optimizations.push(`Merged ${mergedCount} redundant document searches`);
+          }
+        }
+
+        // 2. Optimize task ordering
+        const { workflow: reorderedWorkflow, reordered } = optimizeTaskOrder(optimizedWorkflow);
+        optimizedWorkflow = reorderedWorkflow;
+        if (reordered) {
+          optimizations.push("Reordered tasks for optimal data flow");
+        }
+
+        // 3. Identify parallelizable tasks
+        if (parallelize) {
+          const parallelGroups = identifyParallelTasks(optimizedWorkflow);
+          if (parallelGroups.length > 0) {
+            optimizedWorkflow = addParallelExecution(optimizedWorkflow, parallelGroups);
+            optimizations.push(`Identified ${parallelGroups.length} parallel task groups`);
+          }
+        }
+
+        // 4. Goal-specific optimizations
+        if (optimization_goal === "speed") {
+          optimizedWorkflow = optimizeForSpeed(optimizedWorkflow);
+          optimizations.push("Optimized for minimum latency");
+        } else if (optimization_goal === "cost") {
+          optimizedWorkflow = optimizeForCost(optimizedWorkflow);
+          optimizations.push("Optimized for minimum token usage");
+        }
+
+        // 5. Add intelligent caching
+        optimizedWorkflow = addIntelligentCaching(optimizedWorkflow);
+        optimizations.push("Added intelligent caching");
+
+        const optimizedYaml = yaml.dump(optimizedWorkflow, { indent: 2 });
+        const performanceEstimate = estimateWorkflowPerformance(optimizedWorkflow);
+        const costEstimate = estimateWorkflowCost(optimizedWorkflow);
+
+        let result = `# Workflow Optimization Results\n\n`;
+        result += `## Optimized Workflow\n\n\`\`\`yaml\n${optimizedYaml}\n\`\`\`\n\n`;
+        result += `## Applied Optimizations\n\n`;
+        optimizations.forEach(opt => {
+          result += `- ${opt}\n`;
+        });
+        result += `\n## Performance Estimates\n\n`;
+        result += `- **Estimated Latency**: ${performanceEstimate.latency}ms\n`;
+        result += `- **Estimated Cost**: $${costEstimate.cost}\n`;
+        result += `- **Parallelizable Tasks**: ${performanceEstimate.parallelizable ? 'Yes' : 'No'}\n`;
+        
+        if (performanceEstimate.bottlenecks.length > 0) {
+          result += `- **Bottlenecks**: ${performanceEstimate.bottlenecks.join(', ')}\n`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error optimizing workflow:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error optimizing workflow: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Register a tool for resolving context variables
+  server.tool(
+    "resolve-context-variables",
+    "Resolves all required context variables for an agent and generates proper environment configuration",
+    {
+      agent_config: z
+        .object({})
+        .describe("Agent configuration to analyze")
+        .passthrough(),
+      list_all_variables: z
+        .boolean()
+        .describe("List all required variables")
+        .default(true),
+      generate_defaults: z
+        .boolean()
+        .describe("Generate default values")
+        .default(true),
+      validate_references: z
+        .boolean()
+        .describe("Ensure all references exist")
+        .default(true),
+    },
+    async ({ agent_config, list_all_variables, generate_defaults, validate_references }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: "Resolving context variables...",
+          },
+        });
+
+        const requiredVariables = new Set<string>();
+        const variableUsage: Record<string, string[]> = {};
+
+        // Extract variables from workflows
+        if (agent_config.workflows) {
+          const workflows = Array.isArray(agent_config.workflows) ? agent_config.workflows : [];
+          for (const workflow of workflows) {
+            const workflowVars = extractWorkflowVariables(workflow);
+            Object.keys(workflowVars).forEach(varCategory => {
+              requiredVariables.add(varCategory);
+              if (!variableUsage[varCategory]) {
+                variableUsage[varCategory] = [];
+              }
+              variableUsage[varCategory].push(...workflowVars[varCategory]);
+            });
+          }
+        }
+
+        // Check agent context
+        if (agent_config.context) {
+          const contextVars = extractContextVariables(agent_config.context);
+          contextVars.forEach(varCategory => requiredVariables.add(varCategory));
+        }
+
+        // Generate context variable configuration
+        const contextConfig: any = {
+          "context-variables": {}
+        };
+
+        // Process each required variable
+        Array.from(requiredVariables).forEach(varCategory => {
+          if (varCategory === "machina-ai") {
+            contextConfig["context-variables"][varCategory] = {
+              api_key: "$TEMP_CONTEXT_VARIABLE_SDK_OPENAI_API_KEY"
+            };
+          } else if (varCategory === "groq") {
+            contextConfig["context-variables"][varCategory] = {
+              api_key: "$TEMP_CONTEXT_VARIABLE_SDK_GROQ_API_KEY"
+            };
+          } else if (varCategory.startsWith("sportradar")) {
+            contextConfig["context-variables"][varCategory] = {
+              api_key: `$TEMP_CONTEXT_VARIABLE_SDK_${varCategory.toUpperCase().replace('-', '_')}_API_KEY`
+            };
+          } else if (generate_defaults) {
+            contextConfig["context-variables"][varCategory] = generateDefaultVariables(varCategory);
+          }
+        });
+
+        // Validate references
+        const validationErrors: string[] = [];
+        if (validate_references) {
+          validationErrors.push(...validateVariableReferences(agent_config, contextConfig));
+        }
+
+        const environmentVariables = listEnvironmentVariables(contextConfig);
+        const contextYaml = yaml.dump(contextConfig, { indent: 2 });
+
+        let result = `# Context Variables Resolution\n\n`;
+        result += `## Context Configuration\n\n\`\`\`yaml\n${contextYaml}\n\`\`\`\n\n`;
+        result += `## Required Variables\n\n`;
+        Array.from(requiredVariables).forEach(varCategory => {
+          result += `- **${varCategory}**: Used in ${variableUsage[varCategory]?.length || 0} locations\n`;
+        });
+
+        result += `\n## Environment Variables\n\n`;
+        environmentVariables.forEach(envVar => {
+          result += `- \`${envVar}\`\n`;
+        });
+
+        if (validationErrors.length > 0) {
+          result += `\n## Validation Errors\n\n`;
+          validationErrors.forEach(error => {
+            result += `- ❌ ${error}\n`;
+          });
+        } else {
+          result += `\n✅ All variable references are valid\n`;
+        }
+
+        result += `\n## Variable Usage Summary\n\n`;
+        Object.entries(variableUsage).forEach(([category, locations]) => {
+          result += `- **${category}**: ${locations.join(', ')}\n`;
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error resolving context variables:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error resolving context variables: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Register a tool for assembling complete agents
+  server.tool(
+    "assemble-complete-agent",
+    "Assembles all components into a complete, deployable agent package",
+    {
+      base_config: z
+        .object({})
+        .describe("Base agent configuration")
+        .passthrough(),
+      workflows: z
+        .array(z.object({}).passthrough())
+        .describe("List of workflow configurations")
+        .default([]),
+      prompts: z
+        .array(z.object({}).passthrough())
+        .describe("List of prompt configurations")
+        .default([]),
+      mappings: z
+        .array(z.object({}).passthrough())
+        .describe("List of mapping configurations")
+        .default([]),
+      validate_completeness: z
+        .boolean()
+        .describe("Ensure all references are resolved")
+        .default(true),
+    },
+    async ({ base_config, workflows, prompts, mappings, validate_completeness }, { sendNotification }): Promise<CallToolResult> => {
+      try {
+        await sendNotification({
+          method: "notifications/message",
+          params: {
+            level: "info",
+            data: "Assembling complete agent package...",
+          },
+        });
+
+        // Initialize complete agent structure
+        const completeAgent: any = {
+          agent: {
+            name: (base_config as any).agent?.name || "generated-agent",
+            title: (base_config as any).agent?.title || "Generated Agent",
+            description: (base_config as any).agent?.description || "Agent generated from natural language",
+            ...(base_config as any).agent
+          },
+          workflows,
+          prompts,
+          mappings,
+          connectors: []
+        };
+
+        // Extract and deduplicate required connectors
+        const requiredConnectors = extractRequiredConnectorsFromWorkflows(workflows);
+        completeAgent.connectors = Array.from(requiredConnectors);
+
+        // Merge context variables from all components
+        const allContextVars = mergeContextVariables(workflows);
+        if (!completeAgent.agent.context) {
+          completeAgent.agent.context = {};
+        }
+        Object.assign(completeAgent.agent.context, allContextVars);
+
+        // Link workflows to agent
+        if (!completeAgent.agent.workflows) {
+          completeAgent.agent.workflows = [];
+        }
+
+        workflows.forEach(workflow => {
+          const workflowRef = {
+            name: (workflow as any).workflow?.name,
+            description: (workflow as any).workflow?.description || "",
+            outputs: (workflow as any).workflow?.outputs || {}
+          };
+          completeAgent.agent.workflows.push(workflowRef);
+        });
+
+        // Validate completeness
+        const validationResults = { errors: [] as string[], warnings: [] as string[] };
+        if (validate_completeness) {
+          Object.assign(validationResults, validateAgentCompleteness(completeAgent));
+        }
+
+        // Generate deployment package structure
+        const deploymentPackage = createDeploymentPackage(completeAgent);
+        const requiredApiKeys = listRequiredApiKeys(completeAgent);
+        const performanceEstimate = estimateAgentPerformance(completeAgent);
+
+        const agentYaml = yaml.dump(completeAgent, { indent: 2 });
+
+        let result = `# Complete Agent Assembly: ${completeAgent.agent.name}\n\n`;
+        
+        if (validationResults.errors.length > 0) {
+          result += `## ❌ Validation Errors\n\n`;
+          validationResults.errors.forEach(error => {
+            result += `- ${error}\n`;
+          });
+          result += '\n';
+        }
+
+        if (validationResults.warnings.length > 0) {
+          result += `## ⚠️ Validation Warnings\n\n`;
+          validationResults.warnings.forEach(warning => {
+            result += `- ${warning}\n`;
+          });
+          result += '\n';
+        }
+
+        result += `## Complete Agent Configuration\n\n\`\`\`yaml\n${agentYaml}\n\`\`\`\n\n`;
+        
+        result += `## Deployment Package Structure\n\n`;
+        result += generateDeploymentStructure(deploymentPackage);
+
+        result += `\n## Required API Keys\n\n`;
+        requiredApiKeys.forEach(key => {
+          result += `- \`${key}\`\n`;
+        });
+
+        result += `\n## Performance Estimates\n\n`;
+        result += `- **Estimated Latency**: ${performanceEstimate.latency}ms\n`;
+        result += `- **Estimated Cost per Run**: $${performanceEstimate.cost}\n`;
+        result += `- **Workflow Count**: ${workflows.length}\n`;
+        result += `- **Connector Count**: ${completeAgent.connectors.length}\n`;
+
+        result += `\n## Deployment Commands\n\n\`\`\`bash\n`;
+        deploymentPackage.deployment_commands.forEach((cmd: string) => {
+          result += `${cmd}\n`;
+        });
+        result += `\`\`\`\n`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error assembling complete agent:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error assembling complete agent: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Helper functions for the new tools
+
+  function getConnectorInfo(connectorName: string) {
+    const connectorMap: Record<string, any> = {
+      "sportradar-soccer": {
+        type: "data",
+        description: "SportRadar Soccer API connector for match data, statistics, and team information",
+        requiresApiKey: true,
+        supportedSports: ["soccer"],
+        commands: [
+          {
+            name: "get_match_summary",
+            description: "Get summary of a soccer match",
+            parameters: ["match_id", "season_id"],
+            schema: { match_id: "string", season_id: "string" }
+          },
+          {
+            name: "get_team_profile",
+            description: "Get team profile and statistics",
+            parameters: ["team_id"],
+            schema: { team_id: "string" }
+          }
+        ]
+      },
+      "sportradar-nba": {
+        type: "data",
+        description: "SportRadar NBA API connector for game data, player statistics, and team information",
+        requiresApiKey: true,
+        supportedSports: ["basketball", "nba"],
+        commands: [
+          {
+            name: "get_game_summary",
+            description: "Get summary of an NBA game",
+            parameters: ["game_id"],
+            schema: { game_id: "string" }
+          },
+          {
+            name: "get_player_profile",
+            description: "Get player profile and statistics",
+            parameters: ["player_id"],
+            schema: { player_id: "string" }
+          }
+        ]
+      },
+      "sportradar-nfl": {
+        type: "data",
+        description: "SportRadar NFL API connector for game data, player statistics, and team information",
+        requiresApiKey: true,
+        supportedSports: ["football", "nfl"],
+        commands: [
+          {
+            name: "get_game_summary",
+            description: "Get summary of an NFL game",
+            parameters: ["game_id"],
+            schema: { game_id: "string" }
+          },
+          {
+            name: "get_team_roster",
+            description: "Get team roster and player information",
+            parameters: ["team_id"],
+            schema: { team_id: "string" }
+          }
+        ]
+      },
+      "openai": {
+        type: "ai",
+        description: "OpenAI API connector for language models and embeddings",
+        requiresApiKey: true,
+        commands: [
+          {
+            name: "chat_completion",
+            description: "Generate chat completions",
+            parameters: ["messages", "model", "temperature"],
+            schema: { 
+              messages: "array", 
+              model: "string", 
+              temperature: "number" 
+            }
+          }
+        ]
+      },
+      "groq": {
+        type: "ai",
+        description: "Groq API connector for fast inference",
+        requiresApiKey: true,
+        commands: [
+          {
+            name: "chat_completion",
+            description: "Generate chat completions with fast inference",
+            parameters: ["messages", "model"],
+            schema: { messages: "array", model: "string" }
+          }
+        ]
+      },
+      "stability": {
+        type: "ai",
+        description: "Stability AI connector for image generation",
+        requiresApiKey: true,
+        commands: [
+          {
+            name: "text_to_image",
+            description: "Generate images from text prompts",
+            parameters: ["prompt", "model", "width", "height"],
+            schema: { 
+              prompt: "string", 
+              model: "string", 
+              width: "number", 
+              height: "number" 
+            }
+          }
+        ]
+      },
+      "perplexity": {
+        type: "ai",
+        description: "Perplexity AI connector for search-augmented responses",
+        requiresApiKey: true,
+        commands: [
+          {
+            name: "search_completion",
+            description: "Generate responses with real-time search",
+            parameters: ["messages", "model"],
+            schema: { messages: "array", model: "string" }
+          }
+        ]
+      }
+    };
+
+    return connectorMap[connectorName] || null;
+  }
+
+  function analyzeFieldCompatibility(sourceSchema: any, targetSchema: any): Record<string, string> {
+    const mappings: Record<string, string> = {};
+    const sourceProps = sourceSchema.properties || {};
+    const targetProps = targetSchema.properties || {};
+
+    // Ensure targetProps is a proper object before iterating
+    const targetPropsObj = targetProps as Record<string, any>;
+    
+    for (const [targetField] of Object.entries(targetPropsObj)) {
+      // Direct name match
+      if (sourceProps[targetField]) {
+        mappings[targetField] = targetField;
+        continue;
+      }
+
+      // Common aliases
+      const aliases: Record<string, string[]> = {
+        "id": ["_id", "identifier", "uid"],
+        "name": ["title", "label", "display_name"],
+        "description": ["desc", "summary", "details"],
+        "timestamp": ["time", "datetime", "created_at", "date"],
+        "status": ["state", "condition"],
+        "type": ["category", "kind"],
+        "value": ["amount", "score", "number"]
+      };
+
+      // Check aliases
+      for (const [aliasGroup, aliasList] of Object.entries(aliases)) {
+        if (targetField === aliasGroup) {
+          for (const alias of aliasList) {
+            if (sourceProps[alias]) {
+              mappings[targetField] = alias;
+              break;
+            }
+          }
+        } else if (aliasList.includes(targetField) && sourceProps[aliasGroup]) {
+          mappings[targetField] = aliasGroup;
+          break;
+        }
+      }
+
+      // Fuzzy matching for similar names
+      if (!mappings[targetField]) {
+        for (const sourceField of Object.keys(sourceProps)) {
+          const similarity = calculateFieldSimilarity(targetField, sourceField);
+          if (similarity > 0.8) {
+            mappings[targetField] = sourceField;
+            break;
+          }
+        }
+      }
+    }
+
+    return mappings;
+  }
+
+  function calculateFieldSimilarity(field1: string, field2: string): number {
+    const field1Parts = new Set(field1.toLowerCase().split(/[_-]/));
+    const field2Parts = new Set(field2.toLowerCase().split(/[_-]/));
+    
+    if (field1Parts.size === 0 || field2Parts.size === 0) return 0;
+    
+    const intersection = new Set(Array.from(field1Parts).filter(x => field2Parts.has(x)));
+    const union = new Set([...Array.from(field1Parts), ...Array.from(field2Parts)]);
+    
+    return union.size > 0 ? intersection.size / union.size : 0;
+  }
+
+  function inferFieldType(schema: any, fieldName: string): string {
+    const field = schema.properties?.[fieldName];
+    return field?.type || "string";
+  }
+
+  function isFieldRequired(schema: any, fieldName: string): boolean {
+    return schema.required?.includes(fieldName) || false;
+  }
+
+  function generateTransformations(sourceSchema: any, targetSchema: any, mappings: Record<string, string>): Record<string, any> {
+    const transformations: Record<string, any> = {};
+    
+    // Add common transformations
+    for (const [targetField, sourceField] of Object.entries(mappings)) {
+      const sourceType = inferFieldType(sourceSchema, sourceField);
+      const targetType = inferFieldType(targetSchema, targetField);
+      
+      if (sourceType !== targetType) {
+        if (sourceType === "string" && targetType === "number") {
+          transformations[`${targetField}_transform`] = {
+            path: `$.get('${sourceField}')`,
+            transform: "parseInt"
+          };
+        } else if (sourceType === "number" && targetType === "string") {
+          transformations[`${targetField}_transform`] = {
+            path: `$.get('${sourceField}')`,
+            transform: "toString"
+          };
+        }
+      }
+    }
+    
+    return transformations;
+  }
+
+  function getSchemaForUseCase(useCase: string): any {
+    const schemas: Record<string, any> = {
+      chat: {
+        title: "ChatCompletions",
+        type: "object",
+        properties: {
+          choices: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                message: {
+                  type: "object",
+                  properties: {
+                    role: { type: "string", enum: ["assistant"] },
+                    content: { type: "string" }
+                  },
+                  required: ["role", "content"]
+                }
+              },
+              required: ["message"]
+            }
+          }
+        },
+        required: ["choices"]
+      },
+      content: {
+        title: "ContentGeneration",
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          sections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                heading: { type: "string" },
+                content: { type: "string" }
+              },
+              required: ["heading", "content"]
+            }
+          },
+          summary: { type: "string" },
+          tags: { type: "array", items: { type: "string" } }
+        },
+        required: ["title", "sections"]
+      },
+      quiz: {
+        title: "QuizGeneration",
+        type: "object",
+        properties: {
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string" },
+                options: { type: "array", items: { type: "string" } },
+                correct_answer: { type: "string" },
+                explanation: { type: "string" }
+              },
+              required: ["question", "options", "correct_answer"]
+            }
+          }
+        },
+        required: ["questions"]
+      },
+      general: {
+        title: "GeneralResponse",
+        type: "object",
+        properties: {
+          content: { type: "string" },
+          metadata: { type: "object" }
+        },
+        required: ["content"]
+      }
+    };
+
+    return schemas[useCase] || schemas.general;
+  }
+
+  function enhanceSchemaWithFields(baseSchema: any, requiredFields: string[], outputFormat: string): any {
+    const enhanced = JSON.parse(JSON.stringify(baseSchema));
+    
+    // Add required fields to schema
+    if (!enhanced.properties) enhanced.properties = {};
+    if (!enhanced.required) enhanced.required = [];
+    
+    requiredFields.forEach(field => {
+      if (!enhanced.properties[field]) {
+        enhanced.properties[field] = { type: "string" };
+        enhanced.required.push(field);
+      }
+    });
+
+    // Adjust for output format
+    if (outputFormat === "markdown") {
+      enhanced.properties.markdown_content = { type: "string" };
+    } else if (outputFormat === "json") {
+      enhanced.properties.json_data = { type: "object" };
+    }
+
+    return enhanced;
+  }
+
+  function optimizeSchemaForModel(schema: any, model: string): any {
+    const optimized = JSON.parse(JSON.stringify(schema));
+    
+    // Model-specific optimizations
+    if (model.includes("gpt-4")) {
+      // GPT-4 can handle more complex schemas
+      optimized.additionalProperties = false;
+    } else if (model.includes("groq")) {
+      // Groq prefers simpler schemas for speed
+      if (optimized.properties) {
+        Object.values(optimized.properties).forEach((prop: any) => {
+          if (prop.type === "object" && !prop.properties) {
+            prop.additionalProperties = true;
+          }
+        });
+      }
+    }
+
+    return optimized;
+  }
+
+  function estimateSchemaTokenUsage(schema: any): number {
+    const schemaStr = JSON.stringify(schema);
+    return Math.ceil(schemaStr.length / 4); // Rough estimation: 4 chars per token
+  }
+
+  function mergeDocumentSearches(workflow: any): { workflow: any, mergedCount: number } {
+    const tasks = workflow.workflow?.tasks || [];
+    let mergedCount = 0;
+    const optimizedTasks: any[] = [];
+    const searchCache: Record<string, string> = {};
+
+    for (const task of tasks) {
+      if (task.type === "document" && task.config?.action === "search") {
+        const searchKey = `${task.inputs?.name}_${task.config?.['threshold-docs']}`;
+        
+        if (searchCache[searchKey]) {
+          task.inputs = { ...task.inputs, cached_from: searchCache[searchKey] };
+          mergedCount++;
+        } else {
+          searchCache[searchKey] = task.name;
+          optimizedTasks.push(task);
+        }
+      } else {
+        optimizedTasks.push(task);
+      }
+    }
+
+    workflow.workflow.tasks = optimizedTasks;
+    return { workflow, mergedCount };
+  }
+
+  function optimizeTaskOrder(workflow: any): { workflow: any, reordered: boolean } {
+    // Simple reordering: move document searches before prompts
+    const tasks = workflow.workflow?.tasks || [];
+    const documentTasks = tasks.filter((t: any) => t.type === "document");
+    const promptTasks = tasks.filter((t: any) => t.type === "prompt");
+    const otherTasks = tasks.filter((t: any) => !["document", "prompt"].includes(t.type));
+    
+    const reorderedTasks = [...documentTasks, ...otherTasks, ...promptTasks];
+    const reordered = JSON.stringify(tasks) !== JSON.stringify(reorderedTasks);
+    
+    workflow.workflow.tasks = reorderedTasks;
+    return { workflow, reordered };
+  }
+
+  function identifyParallelTasks(workflow: any): string[][] {
+    const tasks = workflow.workflow?.tasks || [];
+    const parallelGroups: string[][] = [];
+    
+    // Group independent document searches
+    const documentTasks = tasks.filter((t: any) => t.type === "document");
+    if (documentTasks.length > 1) {
+      parallelGroups.push(documentTasks.map((t: any) => t.name));
+    }
+    
+    return parallelGroups;
+  }
+
+  function addParallelExecution(workflow: any, parallelGroups: string[][]): any {
+    // Add parallel execution metadata
+    if (!workflow.workflow.metadata) workflow.workflow.metadata = {};
+    workflow.workflow.metadata.parallel_groups = parallelGroups;
+    return workflow;
+  }
+
+  function optimizeForSpeed(workflow: any): any {
+    // Add speed optimizations
+    const tasks = workflow.workflow?.tasks || [];
+    tasks.forEach((task: any) => {
+      if (task.type === "prompt") {
+        // Use faster models for speed optimization
+        if (task.connector?.name === "openai") {
+          task.connector.model = "gpt-3.5-turbo";
+        }
+      }
+    });
+    return workflow;
+  }
+
+  function optimizeForCost(workflow: any): any {
+    // Add cost optimizations
+    const tasks = workflow.workflow?.tasks || [];
+    tasks.forEach((task: any) => {
+      if (task.type === "prompt") {
+        // Use more cost-effective models
+        if (task.connector?.name === "openai") {
+          task.connector.model = "gpt-3.5-turbo";
+          task.connector.max_tokens = 1000; // Limit tokens for cost
+        }
+      }
+    });
+    return workflow;
+  }
+
+  function addIntelligentCaching(workflow: any): any {
+    // Add caching configuration
+    if (!workflow.workflow.config) workflow.workflow.config = {};
+    workflow.workflow.config.caching = {
+      enabled: true,
+      ttl: 3600, // 1 hour cache
+      cache_key_fields: ["entity_name", "date_range"]
+    };
+    return workflow;
+  }
+
+  function estimateWorkflowPerformance(workflow: any): any {
+    const tasks = workflow.workflow?.tasks || [];
+    const taskTimes: Record<string, number> = {
+      connector: 500,
+      document: 200,
+      prompt: 1500,
+      mapping: 50
+    };
+
+    let totalTime = 0;
+    const bottlenecks: string[] = [];
+
+    tasks.forEach((task: any) => {
+      const taskTime = taskTimes[task.type] || 100;
+      totalTime += taskTime;
+      
+      if (taskTime > 1000) {
+        bottlenecks.push(task.name);
+      }
+    });
+
+    return {
+      latency: totalTime,
+      parallelizable: tasks.some((t: any) => t.type === "document"),
+      bottlenecks
+    };
+  }
+
+  function estimateWorkflowCost(workflow: any): any {
+    const tasks = workflow.workflow?.tasks || [];
+    let totalCost = 0;
+
+    tasks.forEach((task: any) => {
+      if (task.type === "prompt") {
+        const model = task.connector?.model || "gpt-3.5-turbo";
+        if (model.includes("gpt-4")) {
+          totalCost += 0.03; // Rough estimate
+        } else {
+          totalCost += 0.001;
+        }
+      }
+    });
+
+    return { cost: totalCost.toFixed(4) };
+  }
+
+  function extractWorkflowVariables(workflow: any): Record<string, string[]> {
+    const variables: Record<string, string[]> = {};
+    const tasks = workflow.workflow?.tasks || [];
+
+    tasks.forEach((task: any) => {
+      if (task.connector?.name) {
+        const connectorName = task.connector.name;
+        if (!variables[connectorName]) {
+          variables[connectorName] = [];
+        }
+        variables[connectorName].push(task.name);
+      }
+    });
+
+    return variables;
+  }
+
+  function extractContextVariables(context: any): string[] {
+    const variables: string[] = [];
+    
+    if (context && typeof context === 'object') {
+      Object.keys(context).forEach(key => {
+        if (key.includes('api') || key.includes('key')) {
+          variables.push(key);
+        }
+      });
+    }
+
+    return variables;
+  }
+
+  function generateDefaultVariables(varCategory: string): any {
+    const defaults: Record<string, any> = {
+      "default": {
+        api_key: `$TEMP_CONTEXT_VARIABLE_SDK_${varCategory.toUpperCase().replace('-', '_')}_API_KEY`
+      }
+    };
+
+    return defaults[varCategory] || defaults.default;
+  }
+
+  function validateVariableReferences(agentConfig: any, contextConfig: any): string[] {
+    const errors: string[] = [];
+    
+    // Check if all referenced connectors have corresponding context variables
+    const workflows = agentConfig.workflows || [];
+    const contextVars = Object.keys(contextConfig["context-variables"] || {});
+    
+    workflows.forEach((workflow: any) => {
+      const tasks = workflow.workflow?.tasks || [];
+      tasks.forEach((task: any) => {
+        if (task.connector?.name && !contextVars.includes(task.connector.name)) {
+          errors.push(`Missing context variable for connector: ${task.connector.name}`);
+        }
+      });
+    });
+
+    return errors;
+  }
+
+  function listEnvironmentVariables(contextConfig: any): string[] {
+    const envVars: string[] = [];
+    const contextVars = contextConfig["context-variables"] || {};
+    
+    Object.values(contextVars).forEach((varConfig: any) => {
+      if (varConfig && typeof varConfig === 'object') {
+        Object.values(varConfig).forEach((value: any) => {
+          if (typeof value === 'string' && value.startsWith('$TEMP_CONTEXT_VARIABLE_')) {
+            envVars.push(value.replace('$TEMP_CONTEXT_VARIABLE_SDK_', ''));
+          }
+        });
+      }
+    });
+
+    return Array.from(new Set(envVars));
+  }
+
+  function extractRequiredConnectorsFromWorkflows(workflows: any[]): Set<string> {
+    const connectors = new Set<string>();
+    
+    workflows.forEach(workflow => {
+      const tasks = workflow.workflow?.tasks || [];
+      tasks.forEach((task: any) => {
+        if (task.connector?.name) {
+          connectors.add(task.connector.name);
+        }
+      });
+    });
+
+    return connectors;
+  }
+
+  function mergeContextVariables(workflows: any[]): any {
+    const merged: any = {};
+    
+    workflows.forEach(workflow => {
+      if (workflow.workflow?.context) {
+        Object.assign(merged, workflow.workflow.context);
+      }
+    });
+
+    return merged;
+  }
+
+  function validateAgentCompleteness(agent: any): { errors: string[], warnings: string[] } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Check required agent fields
+    if (!agent.agent?.name) {
+      errors.push("Agent name is required");
+    }
+
+    // Check workflows
+    if (!agent.workflows || agent.workflows.length === 0) {
+      errors.push("At least one workflow is required");
+    }
+
+    // Validate workflow references
+    const workflowNames = new Set(agent.workflows?.map((w: any) => w.workflow?.name) || []);
+    agent.agent?.workflows?.forEach((agentWf: any) => {
+      if (!workflowNames.has(agentWf.name)) {
+        errors.push(`Referenced workflow '${agentWf.name}' not found`);
+      }
+    });
+
+    return { errors, warnings };
+  }
+
+  function createDeploymentPackage(agent: any): any {
+    const agentName = agent.agent.name;
+    
+    return {
+      directory_structure: {
+        [`${agentName}/`]: {
+          "agent.yml": agent.agent,
+          "workflows/": Object.fromEntries(
+            agent.workflows.map((w: any) => [`${w.workflow.name}.yml`, w])
+          ),
+          "prompts/": Object.fromEntries(
+            agent.prompts.map((p: any) => [`${p.name}.yml`, p])
+          ),
+          "mappings/": Object.fromEntries(
+            agent.mappings.map((m: any) => [`${m.mapping.name}.yml`, m])
+          ),
+          "README.md": generateAgentReadme(agent)
+        }
+      },
+      deployment_commands: [
+        `cd ${agentName}`,
+        "machina agent install .",
+        `machina agent deploy ${agentName}`
+      ]
+    };
+  }
+
+  function generateAgentReadme(agent: any): string {
+    const apiKeys = listRequiredApiKeys(agent);
+    
+    return `# ${agent.agent.title}
+
+${agent.agent.description}
+
+## Installation
+
+1. Install required connectors:
+   \`\`\`bash
+   ${agent.connectors.map((c: string) => `machina connector install ${c}`).join('\n   ')}
+   \`\`\`
+
+2. Configure API keys:
+   \`\`\`bash
+   ${apiKeys.map((key: string) => `export ${key}=YOUR_API_KEY`).join('\n   ')}
+   \`\`\`
+
+3. Deploy agent:
+   \`\`\`bash
+   machina agent deploy ${agent.agent.name}
+   \`\`\`
+
+## Workflows
+
+${agent.workflows.map((w: any) => `- **${w.workflow.name}**: ${w.workflow.description}`).join('\n')}
+
+## Required API Keys
+
+${apiKeys.map((key: string) => `- ${key}`).join('\n')}
+`;
+  }
+
+  function listRequiredApiKeys(agent: any): string[] {
+    const apiKeys = new Set<string>();
+    
+    agent.connectors?.forEach((connector: string) => {
+      if (connector.includes('sportradar')) {
+        apiKeys.add('SPORTRADAR_API_KEY');
+      } else if (connector === 'openai') {
+        apiKeys.add('OPENAI_API_KEY');
+      } else if (connector === 'groq') {
+        apiKeys.add('GROQ_API_KEY');
+      } else if (connector === 'stability') {
+        apiKeys.add('STABILITY_API_KEY');
+      } else if (connector === 'perplexity') {
+        apiKeys.add('PERPLEXITY_API_KEY');
+      }
+    });
+
+    return Array.from(apiKeys);
+  }
+
+  function estimateAgentPerformance(agent: any): any {
+    const workflows = agent.workflows || [];
+    let totalLatency = 0;
+    let totalCost = 0;
+
+    workflows.forEach((workflow: any) => {
+      const perf = estimateWorkflowPerformance(workflow);
+      const cost = estimateWorkflowCost(workflow);
+      
+      totalLatency += perf.latency;
+      totalCost += parseFloat(cost.cost);
+    });
+
+    return {
+      latency: totalLatency,
+      cost: totalCost.toFixed(4)
+    };
+  }
+
+  function generateDeploymentStructure(deploymentPackage: any): string {
+    let structure = "";
+    
+    function generateStructureRecursive(obj: any, indent: string = ""): void {
+      Object.entries(obj).forEach(([key, value]) => {
+        if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
+          structure += `${indent}📁 ${key}\n`;
+          generateStructureRecursive(value, indent + "  ");
+        } else {
+          structure += `${indent}📄 ${key}\n`;
+        }
+      });
+    }
+    
+    generateStructureRecursive(deploymentPackage.directory_structure);
+    return structure;
+  }
+
   return server;
 };
