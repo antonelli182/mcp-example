@@ -411,77 +411,74 @@ export const setupMCPServer = (): McpServer => {
       try {
         // Generate a sanitized template name if not provided
         const templateName = name || `${sport}-${use_case}-${language}`;
+        const sanitizedName = templateName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
         
-        // Parse data sources
+        // Parse data sources and determine appropriate connectors
         const dataSources = data_sources ? data_sources.split(',').map(s => s.trim()) : [];
+        const connectors = determineConnectors(sport, use_case, dataSources);
         
-        // Build the agent template object
-        const template = {
-          name: templateName,
-          description: description,
-          version: "1.0.0",
-          language: language,
-          sport: sport,
-          configuration: {
-            output_format: output_format,
-            use_case: use_case,
-            data_sources: dataSources.length > 0 ? dataSources : [`${sport}-data`, "web-search"],
-          },
-          prompts: {
-            system: `You are a specialized sports AI agent focusing on ${sport}. Your primary task is to ${description} in ${language === "en" ? "English" : language === "es" ? "Spanish" : "Brazilian Portuguese"}.`,
-            examples: include_examples ? [
-              {
-                role: "user",
-                content: `Generate a ${use_case} for the recent ${sport} match between Team A and Team B.`
-              },
-              {
-                role: "assistant",
-                content: `I'll create a detailed ${use_case} for the ${sport} match between Team A and Team B.`
-              }
-            ] : [],
-          },
-          workflows: [
-            {
-              name: "default",
-              description: `Default workflow for ${use_case} generation`,
-              steps: [
-                {
-                  name: "fetch-data",
-                  type: "data-fetch",
-                  config: {
-                    source: dataSources[0] || `${sport}-data`,
-                  }
-                },
-                {
-                  name: "process-data",
-                  type: "data-processing",
-                  config: {
-                    format: "structured",
-                    fields: ["date", "teams", "scores", "key_events", "statistics"]
-                  }
-                },
-                {
-                  name: "generate-content",
-                  type: "content-generation",
-                  config: {
-                    format: output_format,
-                    max_length: 1000,
-                    include_statistics: true
-                  }
-                }
-              ]
-            }
-          ]
-        };
+        // Generate workflow name
+        const workflowName = `workflow-${sanitizedName}`;
+        const promptName = `prompt-${sanitizedName}`;
         
-        // Convert to YAML
-        const yamlTemplate = yaml.dump(template, { indent: 2 });
+        // Create the main workflow YAML
+        const workflowYaml = generateWorkflowYaml(workflowName, sanitizedName, description, sport, use_case, language, connectors, output_format);
+        
+        // Create the prompt YAML
+        const promptYaml = generatePromptYaml(promptName, description, sport, use_case, language, output_format, include_examples);
+        
+        // Create the install YAML
+        const installYaml = generateInstallYaml(promptName, workflowName);
+        
+        // Create comprehensive documentation
+        const documentation = generateDocumentation(templateName, description, sport, use_case, language, connectors, output_format);
         
         return {
           content: [
             {
               type: "text",
-              text: `# Generated ${sport} ${use_case} Agent Template\n\nHere's your new agent template for ${description}:\n\n\`\`\`yaml\n${yamlTemplate}\n\`\`\`\n\n## Usage Instructions\n\nSave this YAML to a file named \`${templateName}.yaml\` and import it into your Machina instance. Make sure you have the required connectors installed:\n\n${dataSources.map(ds => `- ${ds}`).join('\n') || "- No specific data sources required"}\n\nYou can customize this template further by adding more steps or modifying the prompts to better fit your specific needs.`,
+              text: `# Generated Machina Agent Template: ${templateName}
+
+${documentation}
+
+## File Structure
+
+Save the following files in a directory named \`${sanitizedName}/\`:
+
+### 1. _install.yml
+\`\`\`yaml
+${installYaml}
+\`\`\`
+
+### 2. ${workflowName}.yml
+\`\`\`yaml
+${workflowYaml}
+\`\`\`
+
+### 3. ${promptName}.yml
+\`\`\`yaml
+${promptYaml}
+\`\`\`
+
+## Deployment Instructions
+
+1. Create a new directory in your agent-templates folder: \`agent-templates/${sanitizedName}/\`
+2. Save the three YAML files above in that directory
+3. Ensure you have the required connectors installed and configured:
+${connectors.map(connector => `   - ${connector}`).join('\n')}
+4. Upload the template to your Machina Studio instance
+5. Configure the required environment variables and API keys
+6. Test the workflow with sample data
+
+## Customization Options
+
+- Modify the prompt schema to add custom fields
+- Adjust the workflow tasks to include additional data processing steps
+- Add conditional logic for different scenarios
+- Integrate with additional connectors as needed
+- Customize the output format and structure
+
+Your agent is now ready for deployment and can be further customized based on your specific requirements!`,
             },
           ],
         };
@@ -498,6 +495,470 @@ export const setupMCPServer = (): McpServer => {
       }
     }
   );
+
+  // Helper function to determine appropriate connectors based on sport and use case
+  function determineConnectors(sport: string, useCase: string, dataSources: string[]): string[] {
+    const connectors = new Set<string>();
+    
+    // Always include OpenAI for general AI capabilities
+    connectors.add("openai");
+    
+    // Add sport-specific data connectors
+    if (sport.toLowerCase().includes('soccer')) {
+      connectors.add("sportradar-soccer");
+    } else if (sport.toLowerCase().includes('nba')) {
+      connectors.add("sportradar-nba");
+    } else if (sport.toLowerCase().includes('nfl')) {
+      connectors.add("sportradar-nfl");
+    } else if (sport.toLowerCase().includes('mlb')) {
+      connectors.add("sportradar-mlb");
+    } else if (sport.toLowerCase().includes('f1')) {
+      connectors.add("fastf1");
+    } else if (sport.toLowerCase().includes('rugby')) {
+      connectors.add("sportradar-rugby");
+    }
+    
+    // Add use case specific connectors
+    if (useCase.toLowerCase().includes('image')) {
+      connectors.add("stability");
+    }
+    if (useCase.toLowerCase().includes('search') || useCase.toLowerCase().includes('web')) {
+      connectors.add("perplexity");
+    }
+    if (useCase.toLowerCase().includes('betting') || useCase.toLowerCase().includes('prediction')) {
+      connectors.add("tallysight");
+    }
+    
+    // Add any explicitly requested data sources
+    dataSources.forEach(source => {
+      if (source && source.trim()) {
+        connectors.add(source.trim());
+      }
+    });
+    
+    return Array.from(connectors);
+  }
+
+  // Helper function to generate workflow YAML
+  function generateWorkflowYaml(workflowName: string, templateName: string, description: string, sport: string, useCase: string, language: string, connectors: string[], outputFormat: string): string {
+    const hasDataConnector = connectors.some(c => c.includes('sportradar') || c.includes('fastf1') || c.includes('mlb'));
+    const hasImageGeneration = connectors.includes('stability');
+    const hasWebSearch = connectors.includes('perplexity');
+    
+    const workflow = {
+      workflow: {
+        name: workflowName,
+        title: `${sport.charAt(0).toUpperCase() + sport.slice(1)} ${useCase.charAt(0).toUpperCase() + useCase.slice(1)} Agent`,
+        description: description,
+        "context-variables": {
+          openai: {
+            api_key: "$MACHINA_CONTEXT_VARIABLE_OPENAI_API_KEY"
+          },
+          ...(connectors.includes('groq') && {
+            groq: {
+              api_key: "$MACHINA_CONTEXT_VARIABLE_GROQ_API_KEY"
+            }
+          }),
+          ...(hasDataConnector && {
+            sportradar: {
+              api_key: "$MACHINA_CONTEXT_VARIABLE_SPORTRADAR_API_KEY"
+            }
+          }),
+          ...(hasImageGeneration && {
+            stability: {
+              api_key: "$MACHINA_CONTEXT_VARIABLE_STABILITY_API_KEY"
+            }
+          }),
+          ...(hasWebSearch && {
+            perplexity: {
+              api_key: "$MACHINA_CONTEXT_VARIABLE_PERPLEXITY_API_KEY"
+            }
+          })
+        },
+        inputs: {
+          event_code: "$.get('event_code', None)",
+          entity_name: "$.get('entity_name', '')",
+          date_range: "$.get('date_range', 'recent')",
+          custom_params: "$.get('custom_params', {})"
+        },
+        outputs: {
+          content: "$.get('content')",
+          metadata: "$.get('metadata')",
+          "workflow-status": "$.get('content') is not None and 'executed' or 'skipped'"
+        },
+        tasks: generateWorkflowTasks(workflowName.replace('workflow-', 'prompt-'), hasDataConnector, hasImageGeneration, hasWebSearch, useCase, sport)
+      }
+    };
+    
+    return yaml.dump(workflow, { indent: 2 });
+  }
+
+  // Helper function to generate workflow tasks
+  function generateWorkflowTasks(promptName: string, hasDataConnector: boolean, hasImageGeneration: boolean, hasWebSearch: boolean, useCase: string, sport: string): any[] {
+    const tasks = [];
+    
+    // Task 1: Load/fetch data if data connector is available
+    if (hasDataConnector) {
+      tasks.push({
+        type: "document",
+        name: "load-sports-data",
+        description: `Load ${sport} data from external source`,
+        condition: "$.get('event_code') is not None or $.get('entity_name') != ''",
+        config: {
+          action: "search",
+          "search-limit": 10,
+          "search-vector": false
+        },
+        filters: {
+          ...(useCase.includes('event') && { "value.sport_event.id": "$.get('event_code')" }),
+          ...(useCase.includes('team') && { "value.team.name": "$.get('entity_name')" }),
+          ...(useCase.includes('player') && { "value.player.name": "$.get('entity_name')" })
+        },
+        inputs: {
+          name: `'${sport}-data'`
+        },
+        outputs: {
+          "sports-data": "$.get('documents', [])",
+          "data-available": "len($.get('documents', [])) > 0"
+        }
+      });
+    }
+    
+    // Task 2: Web search if needed
+    if (hasWebSearch) {
+      tasks.push({
+        type: "connector",
+        name: "web-search",
+        description: "Search for additional context and recent information",
+        condition: hasDataConnector ? "$.get('data-available') is True" : "True",
+        connector: {
+          name: "perplexity",
+          command: "search"
+        },
+        inputs: {
+          query: `"${sport} ${useCase} " + $.get('entity_name', '') + " recent news"`
+        },
+        outputs: {
+          "web-results": "$",
+          "additional-context": "$.get('results', [])"
+        }
+      });
+    }
+    
+    // Task 3: Main content generation
+    tasks.push({
+      type: "prompt",
+      name: "generate-content",
+      description: `Generate ${useCase} content using AI`,
+      condition: hasDataConnector ? "$.get('data-available') is True" : "True",
+      connector: {
+        name: "openai",
+        command: "invoke_prompt",
+        model: "gpt-4o"
+      },
+      inputs: {
+        ...(hasDataConnector && { "sports_data": "$.get('sports-data', [])" }),
+        ...(hasWebSearch && { "web_context": "$.get('additional-context', [])" }),
+        entity_name: "$.get('entity_name', '')",
+        date_range: "$.get('date_range', 'recent')",
+        custom_params: "$.get('custom_params', {})"
+      },
+      outputs: {
+        content: "$",
+        metadata: "$.get('metadata', {})"
+      }
+    });
+    
+    // Task 4: Image generation if needed
+    if (hasImageGeneration) {
+      tasks.push({
+        type: "connector",
+        name: "generate-image",
+        description: "Generate accompanying image",
+        condition: "$.get('content') is not None",
+        connector: {
+          name: "stability",
+          command: "generate_image"
+        },
+        inputs: {
+          prompt: `"${sport} ${useCase} image featuring " + $.get('entity_name', '') + " in action"`
+        },
+        outputs: {
+          "image-url": "$.get('image_url')",
+          "image-metadata": "$.get('metadata', {})"
+        }
+      });
+    }
+    
+    // Task 5: Store results
+    tasks.push({
+      type: "document",
+      name: "store-results",
+      description: "Store the generated content",
+      condition: "$.get('content') is not None",
+      config: {
+        action: "create",
+        "embed-vector": true,
+        "force-update": false
+      },
+      documents: {
+        [`content-${useCase}`]: {
+          content: "$.get('content')",
+          metadata: {
+            sport: sport,
+            use_case: useCase,
+            entity_name: "$.get('entity_name', '')",
+            generated_at: "datetime.utcnow().isoformat()",
+            ...(hasImageGeneration && { image_url: "$.get('image-url')" })
+          },
+          status: "active"
+        }
+      },
+      metadata: {
+        document_type: `'content-${useCase}'`,
+        sport: `'${sport}'`,
+        entity: "$.get('entity_name', '')"
+      }
+    });
+    
+    return tasks;
+  }
+
+  // Helper function to generate prompt YAML
+  function generatePromptYaml(promptName: string, description: string, sport: string, useCase: string, language: string, outputFormat: string, includeExamples: boolean): string {
+    const languageMap = {
+      'en': 'English',
+      'es': 'Spanish',
+      'pt-br': 'Brazilian Portuguese'
+    };
+    
+    const langFull = languageMap[language as keyof typeof languageMap] || 'English';
+    const langCode = language === 'pt-br' ? 'Portuguese' : language === 'es' ? 'Spanish' : 'English';
+    
+    const schema = generatePromptSchema(useCase, outputFormat, langCode);
+    
+    const prompt = {
+      prompts: [
+        {
+          type: "prompt",
+          title: `${sport.charAt(0).toUpperCase() + sport.slice(1)} ${useCase.charAt(0).toUpperCase() + useCase.slice(1)} Generator`,
+          name: promptName,
+          description: `${description} in ${langFull}`,
+          schema
+        }
+      ]
+    };
+    
+    return yaml.dump(prompt, { indent: 2 });
+  }
+
+  // Helper function to generate prompt schema based on use case
+  function generatePromptSchema(useCase: string, outputFormat: string, language: string): any {
+    const baseSchema = {
+      title: `${useCase.charAt(0).toUpperCase() + useCase.slice(1)}Content`,
+      description: `Schema for generating ${useCase} content in ${language}`,
+      type: "object",
+      properties: {}
+    };
+    
+    // Common properties for all use cases
+    baseSchema.properties = {
+      title: {
+        type: "string",
+        description: `Generate an engaging and compelling title in ${language} that captures the essence of the ${useCase}. Make it attention-grabbing and click-worthy.`
+      }
+    };
+    
+    // Use case specific properties
+    if (useCase.includes('recap')) {
+      baseSchema.properties = {
+        ...baseSchema.properties,
+        subtitle: {
+          type: "string",
+          description: `Create a brief informative subtitle in ${language} that expands on the title and provides more context.`
+        },
+        slug: {
+          type: "string",
+          description: `Create a unique SEO-friendly slug for the content, using hyphens and compatible with URLs.`
+        },
+        content: {
+          type: "string",
+          description: `Write detailed ${useCase} content in ${language}. Include key moments, performance analysis, and engaging narrative. ${outputFormat === 'html' ? 'Wrap content in appropriate HTML tags.' : ''}`
+        },
+        summary: {
+          type: "string",
+          description: `Provide a concise summary of the main points in ${language}.`
+        }
+      };
+    } else if (useCase.includes('quiz')) {
+      baseSchema.properties = {
+        ...baseSchema.properties,
+        questions: {
+          type: "array",
+          description: `Generate quiz questions in ${language}`,
+          items: {
+            type: "object",
+            properties: {
+              question: { type: "string", description: "The quiz question" },
+              options: { type: "array", items: { type: "string" }, description: "Multiple choice options" },
+              correct_answer: { type: "string", description: "The correct answer" },
+              explanation: { type: "string", description: "Explanation for the correct answer" }
+            }
+          }
+        }
+      };
+    } else if (useCase.includes('poll')) {
+      baseSchema.properties = {
+        ...baseSchema.properties,
+        poll_question: {
+          type: "string",
+          description: `Generate an engaging poll question in ${language}`
+        },
+        options: {
+          type: "array",
+          description: "Poll options for users to choose from",
+          items: { type: "string" }
+        }
+      };
+    } else if (useCase.includes('prediction')) {
+      baseSchema.properties = {
+        ...baseSchema.properties,
+        prediction: {
+          type: "string",
+          description: `Generate a detailed prediction analysis in ${language}`
+        },
+        confidence_level: {
+          type: "string",
+          description: "Confidence level for the prediction (high/medium/low)"
+        },
+        key_factors: {
+          type: "array",
+          description: "Key factors influencing the prediction",
+          items: { type: "string" }
+        }
+      };
+    } else {
+      // Generic content structure
+      baseSchema.properties = {
+        ...baseSchema.properties,
+        content: {
+          type: "string",
+          description: `Generate engaging ${useCase} content in ${language}. Make it informative, well-structured, and engaging for the target audience.`
+        }
+      };
+    }
+    
+    return baseSchema;
+  }
+
+  // Helper function to generate install YAML
+  function generateInstallYaml(promptName: string, workflowName: string): string {
+    const install = {
+      datasets: [
+        {
+          type: "prompts",
+          path: `${promptName}.yml`
+        },
+        {
+          type: "workflow", 
+          path: `${workflowName}.yml`
+        }
+      ]
+    };
+    
+    return yaml.dump(install, { indent: 2 });
+  }
+
+  // Helper function to generate comprehensive documentation
+  function generateDocumentation(name: string, description: string, sport: string, useCase: string, language: string, connectors: string[], outputFormat: string): string {
+    const langMap = { 'en': 'English', 'es': 'Spanish', 'pt-br': 'Brazilian Portuguese' };
+    const fullLanguage = langMap[language as keyof typeof langMap] || 'English';
+    
+    return `
+## Overview
+
+**${name}** is a Machina Sports AI agent designed to ${description.toLowerCase()}. This agent specializes in ${sport} and focuses on generating ${useCase} content in ${fullLanguage}.
+
+## Features
+
+- **Sport Focus**: ${sport.charAt(0).toUpperCase() + sport.slice(1)}
+- **Use Case**: ${useCase.charAt(0).toUpperCase() + useCase.slice(1)} generation
+- **Language**: ${fullLanguage}
+- **Output Format**: ${outputFormat.toUpperCase()}
+- **Data Integration**: ${connectors.length} connector(s) integrated
+
+## Required Connectors
+
+${connectors.map(connector => `- **${connector}**: ${getConnectorDescription(connector)}`).join('\n')}
+
+## Environment Variables
+
+Make sure to configure the following environment variables in your Machina instance:
+
+- \`MACHINA_CONTEXT_VARIABLE_OPENAI_API_KEY\`: OpenAI API key for AI generation
+${connectors.includes('sportradar-soccer') || connectors.includes('sportradar-nba') || connectors.includes('sportradar-nfl') ? '- `MACHINA_CONTEXT_VARIABLE_SPORTRADAR_API_KEY`: SportRadar API key for sports data' : ''}
+${connectors.includes('stability') ? '- `MACHINA_CONTEXT_VARIABLE_STABILITY_API_KEY`: Stability AI API key for image generation' : ''}
+${connectors.includes('perplexity') ? '- `MACHINA_CONTEXT_VARIABLE_PERPLEXITY_API_KEY`: Perplexity API key for web search' : ''}
+
+## Input Parameters
+
+- **event_code**: Specific event/match identifier (optional)
+- **entity_name**: Team or player name to focus on
+- **date_range**: Time period to analyze (default: 'recent')
+- **custom_params**: Additional parameters as JSON object
+
+## Usage Examples
+
+### Basic Usage
+\`\`\`json
+{
+  "entity_name": "Manchester United",
+  "date_range": "last_match"
+}
+\`\`\`
+
+### With Event Code
+\`\`\`json
+{
+  "event_code": "sr:match:12345",
+  "entity_name": "Barcelona"
+}
+\`\`\`
+
+### With Custom Parameters
+\`\`\`json
+{
+  "entity_name": "Lakers",
+  "date_range": "last_5_games",
+  "custom_params": {
+    "include_statistics": true,
+    "analysis_depth": "comprehensive"
+  }
+}
+\`\`\`
+`;
+  }
+
+  // Helper function to get connector descriptions
+  function getConnectorDescription(connectorName: string): string {
+    const descriptions: { [key: string]: string } = {
+      'openai': 'AI content generation and natural language processing',
+      'sportradar-soccer': 'Real-time soccer match data, statistics, and event information',
+      'sportradar-nba': 'NBA game data, player statistics, and team performance metrics',
+      'sportradar-nfl': 'NFL game information, player stats, and league data',
+      'sportradar-mlb': 'MLB baseball statistics and game information',
+      'sportradar-rugby': 'Rugby match data and player statistics',
+      'fastf1': 'Formula 1 race data, lap times, and driver statistics',
+      'stability': 'AI image generation for visual content',
+      'perplexity': 'Web search and real-time information retrieval',
+      'tallysight': 'Sports betting odds and prediction data',
+      'groq': 'Fast AI inference for real-time content generation',
+      'elevenlabs': 'Text-to-speech and voice generation',
+      'machina-ai': 'Machina\'s proprietary AI services'
+    };
+    
+    return descriptions[connectorName] || 'Sports data and AI integration';
+  }
 
   // Prompt that guides a user through creating a new agent template
   server.prompt(
@@ -912,10 +1373,13 @@ Your content should be immediately usable in a social media or fan engagement ca
       let connectorContext = "";
       let analysisGuidance = "";
       
+      // Default output format if not provided
+      const format = output_format || "text";
+      
       // Match data source to actual connectors
-      if (data_source.includes("sportradar")) {
+      if (data_source && data_source.includes("sportradar")) {
         const sportType = data_source.split('-')[1] || sport;
-        connectorContext = `The ${data_source} connector provides comprehensive ${sportType.toUpperCase()} data including player statistics, team performance, and game events.`;
+        connectorContext = `The ${data_source} connector provides comprehensive ${sportType?.toUpperCase()} data including player statistics, team performance, and game events.`;
         
         if (sportType === "nba") {
           analysisGuidance = "Consider both traditional stats (points, rebounds, assists) and advanced metrics (PER, true shooting percentage, etc.)";
@@ -926,17 +1390,17 @@ Your content should be immediately usable in a social media or fan engagement ca
         } else if (sportType === "soccer") {
           analysisGuidance = "For soccer, consider possession metrics, expected goals (xG), and defensive contributions";
         }
-      } else if (data_source.includes("fastf1")) {
+      } else if (data_source && data_source.includes("fastf1")) {
         connectorContext = "The fastf1 connector provides Formula 1 racing data including lap times, tire strategies, and car telemetry.";
         analysisGuidance = "F1 analysis should consider factors like tire degradation, track position, and race strategy";
-      } else if (data_source.includes("statsapi")) {
+      } else if (data_source && data_source.includes("statsapi")) {
         connectorContext = "The mlb-statsapi connector offers detailed baseball statistics and play-by-play information.";
         analysisGuidance = "Consider traditional and advanced statistics to provide a comprehensive view of performance";
-      } else if (data_source.includes("tallysight")) {
+      } else if (data_source && data_source.includes("tallysight")) {
         connectorContext = "The tallysight connector provides sports predictions and betting insights across multiple sports.";
         analysisGuidance = "Focus on probability-based analysis and prediction accuracy metrics";
       } else {
-        connectorContext = `The ${data_source} connector provides specialized data for ${sport} analysis.`;
+        connectorContext = `The ${data_source || 'specified'} connector provides specialized data for ${sport} analysis.`;
         analysisGuidance = "Focus on the most relevant metrics for your specific analysis goals";
       }
       
@@ -948,11 +1412,11 @@ Your content should be immediately usable in a social media or fan engagement ca
         ? `Entities to analyze: ${entities.join(', ')}`
         : "Analyze all relevant entities in the dataset";
       
-      const outputGuidance = output_format === 'json' 
+      const outputGuidance = format === 'json' 
         ? "Provide a structured JSON response with clearly labeled metrics and insights."
-        : output_format === 'markdown' 
+        : format === 'markdown' 
         ? "Format your response with Markdown for headings, lists, and emphasis."
-        : output_format === 'html'
+        : format === 'html'
         ? "Structure your response with appropriate HTML tags for web display."
         : "Provide a clear, well-organized text response.";
       
@@ -962,7 +1426,7 @@ Your content should be immediately usable in a social media or fan engagement ca
             role: "user",
             content: {
               type: "text",
-              text: `You are a data analyst specializing in ${sport}. Generate insights using data from the ${data_source} connector.
+              text: `You are a data analyst specializing in ${sport}. Generate insights using data from the ${data_source || 'specified'} connector.
 
 ${connectorContext}
 
@@ -1046,6 +1510,509 @@ Structure your analysis to be comprehensive yet accessible, with a clear flow fr
     }
   );
 
+  // Tool for analyzing agent requirements and suggesting optimizations
+  server.tool(
+    "analyze-agent-requirements",
+    "Analyzes agent requirements and suggests optimal configurations, connectors, and workflows",
+    {
+      requirements: z.string().describe("Natural language description of the agent requirements"),
+      target_audience: z.string().describe("Target audience (fans, analysts, developers, etc.)").optional(),
+      performance_goals: z.string().describe("Performance goals (speed, accuracy, engagement, etc.)").optional(),
+      existing_template: z.string().describe("Name of existing template to analyze or improve").optional(),
+    },
+    async ({ requirements, target_audience, performance_goals, existing_template }): Promise<CallToolResult> => {
+      try {
+        // Analyze the requirements using NLP patterns
+        const analysis = analyzeAgentRequirements(requirements, target_audience, performance_goals);
+        
+        // Get existing template info if provided
+        let templateAnalysis = "";
+        if (existing_template) {
+          templateAnalysis = analyzeExistingTemplate(existing_template);
+        }
+        
+        // Generate recommendations
+        const recommendations = generateAgentRecommendations(analysis, templateAnalysis);
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `# Agent Requirements Analysis
+
+## Requirement Analysis
+
+${analysis.summary}
+
+## Sport Detection
+- **Primary Sport**: ${analysis.sport}
+- **Confidence**: ${analysis.sportConfidence}%
+
+## Use Case Classification
+- **Primary Use Case**: ${analysis.useCase}
+- **Secondary Use Cases**: ${analysis.secondaryUseCases.join(', ') || 'None'}
+
+## Complexity Assessment
+- **Complexity Level**: ${analysis.complexity}
+- **Estimated Development Time**: ${analysis.estimatedTime}
+
+## Recommended Architecture
+
+### Connectors Needed
+${analysis.connectors.map(c => `- **${c.name}**: ${c.purpose}`).join('\n')}
+
+### Workflow Structure
+${analysis.workflowSteps.map((step, i) => `${i + 1}. **${step.name}**: ${step.description}`).join('\n')}
+
+### Performance Considerations
+${analysis.performanceConsiderations.join('\n')}
+
+${templateAnalysis ? `## Existing Template Analysis\n${templateAnalysis}\n` : ''}
+
+## Recommendations
+
+${recommendations.map(r => `### ${r.category}\n${r.suggestion}\n`).join('\n')}
+
+## Next Steps
+
+1. **Generate Base Template**: Use the \`generate-agent-template\` tool with these parameters:
+   - Sport: ${analysis.sport}
+   - Use Case: ${analysis.useCase}
+   - Language: ${analysis.language}
+
+2. **Install Required Connectors**: Ensure these connectors are available in your Machina instance
+
+3. **Test and Iterate**: Deploy a basic version and gather feedback for improvements
+
+4. **Optimize Performance**: Implement the performance recommendations based on your specific requirements`,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error analyzing agent requirements:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error analyzing agent requirements: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Tool for validating agent configurations before deployment
+  server.tool(
+    "validate-agent-config",
+    "Validates agent configuration for potential issues and deployment readiness",
+    {
+      workflow_yaml: z.string().describe("The workflow YAML configuration to validate"),
+      prompt_yaml: z.string().describe("The prompt YAML configuration to validate").optional(),
+      target_environment: z.string().describe("Target deployment environment (dev, staging, prod)").default("dev"),
+    },
+    async ({ workflow_yaml, prompt_yaml, target_environment }): Promise<CallToolResult> => {
+      try {
+        // Parse YAML configurations
+        let workflowConfig: any;
+        let promptConfig: any;
+        
+        try {
+          workflowConfig = yaml.load(workflow_yaml);
+        } catch (e) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ **Workflow YAML Validation Failed**\n\nError parsing workflow YAML: ${e}\n\nPlease check your YAML syntax.`,
+              },
+            ],
+          };
+        }
+        
+        if (prompt_yaml) {
+          try {
+            promptConfig = yaml.load(prompt_yaml);
+          } catch (e) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `⚠️ **Prompt YAML Validation Warning**\n\nError parsing prompt YAML: ${e}\n\nWorkflow validation will continue...`,
+                },
+              ],
+            };
+          }
+        }
+        
+        // Validate workflow structure
+        const workflowValidation = validateWorkflowConfig(workflowConfig, target_environment);
+        
+        // Validate prompt structure if provided
+        const promptValidation = promptConfig ? validatePromptConfig(promptConfig) : { issues: [], score: 100 };
+        
+        // Generate overall assessment
+        const overallScore = Math.round((workflowValidation.score + promptValidation.score) / 2);
+        const status = overallScore >= 80 ? "✅ Ready for Deployment" : 
+                     overallScore >= 60 ? "⚠️ Needs Minor Improvements" : 
+                     "❌ Requires Major Fixes";
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `# Agent Configuration Validation
+
+## Overall Assessment: ${status}
+**Score**: ${overallScore}/100
+
+## Workflow Validation
+**Score**: ${workflowValidation.score}/100
+
+### Issues Found
+${workflowValidation.issues.length > 0 ? 
+  workflowValidation.issues.map(issue => `- **${issue.severity}**: ${issue.message}`).join('\n') :
+  '✅ No issues found in workflow configuration'}
+
+### Recommendations
+${workflowValidation.recommendations.length > 0 ?
+  workflowValidation.recommendations.map(rec => `- ${rec}`).join('\n') :
+  '✅ Workflow configuration follows best practices'}
+
+${promptConfig ? `## Prompt Validation
+**Score**: ${promptValidation.score}/100
+
+### Issues Found
+${promptValidation.issues.length > 0 ? 
+  promptValidation.issues.map(issue => `- **${issue.severity}**: ${issue.message}`).join('\n') :
+  '✅ No issues found in prompt configuration'}` : ''}
+
+## Deployment Checklist
+
+### Required Environment Variables
+${extractRequiredEnvVars(workflowConfig).map(env => `- [ ] ${env}`).join('\n')}
+
+### Required Connectors
+${extractRequiredConnectors(workflowConfig).map(conn => `- [ ] ${conn}`).join('\n')}
+
+### Performance Considerations
+- Estimated tokens per execution: ${estimateTokenUsage(workflowConfig, promptConfig)}
+- Estimated execution time: ${estimateExecutionTime(workflowConfig)}
+- Recommended rate limits: ${getRecommendedRateLimits(workflowConfig, target_environment)}
+
+## Next Steps
+
+${overallScore >= 80 ? 
+  '✅ Your agent is ready for deployment! Upload the configuration files to your Machina instance.' :
+  '⚠️ Please address the issues above before deployment.'}`,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error validating agent config:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error validating agent configuration: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Helper functions for agent analysis
+  function analyzeAgentRequirements(requirements: string, targetAudience?: string, performanceGoals?: string) {
+    const req = requirements.toLowerCase();
+    
+    // Sport detection
+    const sports = ['soccer', 'football', 'basketball', 'nba', 'nfl', 'baseball', 'mlb', 'tennis', 'golf', 'rugby', 'f1', 'formula 1'];
+    let detectedSport = 'general';
+    let sportConfidence = 0;
+    
+    for (const sport of sports) {
+      if (req.includes(sport)) {
+        detectedSport = sport === 'football' ? 'soccer' : sport === 'basketball' ? 'nba' : sport;
+        sportConfidence = 90;
+        break;
+      }
+    }
+    
+    // Use case detection
+    const useCases = ['recap', 'summary', 'analysis', 'quiz', 'poll', 'prediction', 'preview', 'image', 'video', 'podcast'];
+    let detectedUseCase = 'content';
+    const secondaryUseCases: string[] = [];
+    
+    for (const useCase of useCases) {
+      if (req.includes(useCase)) {
+        if (detectedUseCase === 'content') {
+          detectedUseCase = useCase;
+        } else {
+          secondaryUseCases.push(useCase);
+        }
+      }
+    }
+    
+    // Complexity assessment
+    const complexityIndicators = {
+      simple: ['simple', 'basic', 'quick'],
+      moderate: ['moderate', 'standard', 'regular'],
+      complex: ['complex', 'advanced', 'comprehensive', 'real-time', 'multi-modal']
+    };
+    
+    let complexity = 'moderate';
+    for (const [level, indicators] of Object.entries(complexityIndicators)) {
+      if (indicators.some(indicator => req.includes(indicator))) {
+        complexity = level;
+        break;
+      }
+    }
+    
+    // Determine required connectors
+    const connectors = [
+      { name: 'openai', purpose: 'AI content generation and natural language processing' }
+    ];
+    
+    if (detectedSport !== 'general') {
+      connectors.push({
+        name: `sportradar-${detectedSport}`,
+        purpose: `${detectedSport.toUpperCase()} data and statistics`
+      });
+    }
+    
+    if (req.includes('image') || req.includes('visual')) {
+      connectors.push({ name: 'stability', purpose: 'AI image generation' });
+    }
+    
+    if (req.includes('search') || req.includes('web') || req.includes('news')) {
+      connectors.push({ name: 'perplexity', purpose: 'Web search and real-time information' });
+    }
+    
+    if (req.includes('betting') || req.includes('prediction') || req.includes('odds')) {
+      connectors.push({ name: 'tallysight', purpose: 'Sports betting data and predictions' });
+    }
+    
+    // Workflow steps
+    const workflowSteps = [
+      { name: 'Data Collection', description: 'Gather relevant sports data and context' },
+      { name: 'Content Generation', description: 'Generate AI-powered content based on requirements' },
+      { name: 'Quality Assurance', description: 'Validate and refine generated content' },
+      { name: 'Storage & Distribution', description: 'Store results and prepare for delivery' }
+    ];
+    
+    // Performance considerations
+    const performanceConsiderations = [
+      `• Target audience: ${targetAudience || 'General sports fans'}`,
+      `• Performance goals: ${performanceGoals || 'Standard response time and accuracy'}`,
+      `• Estimated complexity: ${complexity} level implementation`
+    ];
+    
+    return {
+      summary: `Analysis of requirements for a ${detectedSport} ${detectedUseCase} agent with ${complexity} complexity.`,
+      sport: detectedSport,
+      sportConfidence,
+      useCase: detectedUseCase,
+      secondaryUseCases,
+      complexity,
+      estimatedTime: complexity === 'simple' ? '1-2 days' : complexity === 'moderate' ? '3-5 days' : '1-2 weeks',
+      connectors,
+      workflowSteps,
+      performanceConsiderations,
+      language: req.includes('spanish') || req.includes('español') ? 'es' : 
+                req.includes('portuguese') || req.includes('português') ? 'pt-br' : 'en'
+    };
+  }
+  
+  function analyzeExistingTemplate(templateName: string): string {
+    const knownTemplates: Record<string, string> = {
+      'chat-completion': 'Generic chat interface with thread management',
+      'reporter-recap': 'Post-game recap generation with SEO optimization',
+      'reporter-quiz': 'Interactive quiz generation for fan engagement',
+      'gameday-ai-companion': 'Real-time game companion with live updates',
+      'fantasy-draft-assistant': 'Fantasy sports draft recommendations'
+    };
+    
+    const templateType = Object.keys(knownTemplates).find(key => templateName.includes(key));
+    
+    if (templateType && knownTemplates[templateType]) {
+      return `**Existing Template**: ${templateType}\n**Description**: ${knownTemplates[templateType]}\n**Recommendation**: This template provides a solid foundation for your requirements.`;
+    }
+    
+    return `**Template**: ${templateName}\n**Status**: Custom template - please review configuration manually.`;
+  }
+  
+  function generateAgentRecommendations(analysis: any, templateAnalysis: string) {
+    const recommendations = [
+      {
+        category: "Architecture",
+        suggestion: analysis.complexity === 'complex' ? 
+          "Consider implementing microservices architecture with separate workflows for different functions." :
+          "A single workflow architecture will be sufficient for your requirements."
+      },
+      {
+        category: "Performance",
+        suggestion: analysis.connectors.length > 3 ?
+          "Implement caching strategies and consider async processing for better performance." :
+          "Standard synchronous processing should meet your performance needs."
+      },
+      {
+        category: "Scalability",
+        suggestion: analysis.useCase.includes('real-time') ?
+          "Implement rate limiting and consider using Groq for faster inference." :
+          "Standard OpenAI integration will provide good performance for your use case."
+      }
+    ];
+    
+    if (analysis.sport !== 'general') {
+      recommendations.push({
+        category: "Data Integration",
+        suggestion: `Focus on ${analysis.sport} specific data sources and consider implementing data validation for sports statistics.`
+      });
+    }
+    
+    return recommendations;
+  }
+  
+  function validateWorkflowConfig(config: any, environment: string) {
+    const issues: Array<{severity: string, message: string}> = [];
+    const recommendations: string[] = [];
+    let score = 100;
+    
+    // Check required fields
+    if (!config.workflow) {
+      issues.push({ severity: 'ERROR', message: 'Missing workflow configuration' });
+      score -= 30;
+    }
+    
+    if (!config.workflow?.name) {
+      issues.push({ severity: 'ERROR', message: 'Workflow name is required' });
+      score -= 10;
+    }
+    
+    if (!config.workflow?.tasks || config.workflow.tasks.length === 0) {
+      issues.push({ severity: 'ERROR', message: 'At least one task is required' });
+      score -= 20;
+    }
+    
+    // Check environment variables
+    if (!config.workflow?.['context-variables']) {
+      issues.push({ severity: 'WARNING', message: 'No context variables defined - you may need API keys' });
+      score -= 5;
+    }
+    
+    // Check task configurations
+    if (config.workflow?.tasks) {
+      config.workflow.tasks.forEach((task: any, index: number) => {
+        if (!task.name) {
+          issues.push({ severity: 'ERROR', message: `Task ${index + 1} missing name` });
+          score -= 5;
+        }
+        
+        if (!task.type) {
+          issues.push({ severity: 'ERROR', message: `Task ${index + 1} missing type` });
+          score -= 5;
+        }
+        
+        if (task.type === 'connector' && !task.connector) {
+          issues.push({ severity: 'ERROR', message: `Task ${task.name} requires connector configuration` });
+          score -= 10;
+        }
+      });
+    }
+    
+    // Environment-specific checks
+    if (environment === 'prod') {
+      if (!config.workflow?.description) {
+        issues.push({ severity: 'WARNING', message: 'Production workflows should have descriptions' });
+        score -= 5;
+      }
+      
+      recommendations.push('Add comprehensive error handling for production deployment');
+      recommendations.push('Implement monitoring and logging for production use');
+    }
+    
+    return { issues, recommendations, score: Math.max(0, score) };
+  }
+  
+  function validatePromptConfig(config: any) {
+    const issues: Array<{severity: string, message: string}> = [];
+    let score = 100;
+    
+    if (!config.prompts || config.prompts.length === 0) {
+      issues.push({ severity: 'ERROR', message: 'No prompts defined' });
+      score -= 30;
+    }
+    
+    config.prompts?.forEach((prompt: any, index: number) => {
+      if (!prompt.name) {
+        issues.push({ severity: 'ERROR', message: `Prompt ${index + 1} missing name` });
+        score -= 10;
+      }
+      
+      if (!prompt.schema) {
+        issues.push({ severity: 'WARNING', message: `Prompt ${prompt.name} missing schema` });
+        score -= 5;
+      }
+    });
+    
+    return { issues, score: Math.max(0, score) };
+  }
+  
+  function extractRequiredEnvVars(config: any): string[] {
+    const envVars: string[] = [];
+    const contextVars = config.workflow?.['context-variables'] || {};
+    
+    Object.keys(contextVars).forEach(key => {
+      if (typeof contextVars[key] === 'object' && contextVars[key].api_key) {
+        envVars.push(contextVars[key].api_key.replace('$', ''));
+      }
+    });
+    
+    return envVars;
+  }
+  
+  function extractRequiredConnectors(config: any): string[] {
+    const connectors = new Set<string>();
+    
+    config.workflow?.tasks?.forEach((task: any) => {
+      if (task.connector?.name) {
+        connectors.add(task.connector.name);
+      }
+    });
+    
+    return Array.from(connectors);
+  }
+  
+  function estimateTokenUsage(workflowConfig: any, promptConfig?: any): string {
+    const tasks = workflowConfig.workflow?.tasks || [];
+    const promptTasks = tasks.filter((task: any) => task.type === 'prompt');
+    
+    const baseTokens = promptTasks.length * 500; // Estimated base tokens per prompt
+    const complexityMultiplier = tasks.length > 5 ? 1.5 : 1.0;
+    
+    return `${Math.round(baseTokens * complexityMultiplier)} tokens`;
+  }
+  
+  function estimateExecutionTime(config: any): string {
+    const tasks = config.workflow?.tasks || [];
+    const connectorTasks = tasks.filter((task: any) => task.type === 'connector').length;
+    const promptTasks = tasks.filter((task: any) => task.type === 'prompt').length;
+    
+    const estimatedSeconds = (connectorTasks * 2) + (promptTasks * 5);
+    return `${estimatedSeconds}-${estimatedSeconds * 2} seconds`;
+  }
+  
+  function getRecommendedRateLimits(config: any, environment: string): string {
+    const taskCount = config.workflow?.tasks?.length || 0;
+    
+    if (environment === 'prod') {
+      return taskCount > 5 ? '10 requests/minute' : '30 requests/minute';
+    } else {
+      return taskCount > 5 ? '5 requests/minute' : '15 requests/minute';
+    }
+  }
+
   // Helper function to infer template descriptions based on the template name
   function inferTemplateDescription(templateName: string): string {
     const name = templateName.toLowerCase();
@@ -1104,6 +2071,311 @@ Structure your analysis to be comprehensive yet accessible, with a clear flow fr
     
     return 'Integration connector for Machina workflows';
   }
-  
+
+  // Comprehensive tool for end-to-end agent creation
+  server.tool(
+    "create-complete-agent",
+    "Creates a complete Machina agent from natural language requirements - analyzes, generates, and validates the entire solution",
+    {
+      requirements: z.string().describe("Natural language description of what the agent should do"),
+      agent_name: z.string().describe("Name for the agent (will be sanitized for file names)").optional(),
+      target_audience: z.string().describe("Target audience for the agent").optional(),
+      performance_goals: z.string().describe("Performance and quality goals").optional(),
+      custom_features: z.string().describe("Any specific custom features or requirements").optional(),
+    },
+    async ({ requirements, agent_name, target_audience, performance_goals, custom_features }): Promise<CallToolResult> => {
+      try {
+        // Step 1: Analyze requirements
+        const analysis = analyzeAgentRequirements(requirements, target_audience, performance_goals);
+        
+        // Step 2: Determine agent name
+        const finalAgentName = agent_name || `${analysis.sport}-${analysis.useCase}-agent`;
+        const sanitizedName = finalAgentName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        
+        // Step 3: Incorporate custom features
+        const enhancedAnalysis = incorporateCustomFeatures(analysis, custom_features);
+        
+        // Step 4: Generate connectors list
+        const connectors = determineConnectors(enhancedAnalysis.sport, enhancedAnalysis.useCase, []);
+        
+        // Step 5: Generate all required files
+        const workflowName = `workflow-${sanitizedName}`;
+        const promptName = `prompt-${sanitizedName}`;
+        
+        const workflowYaml = generateWorkflowYaml(workflowName, sanitizedName, enhancedAnalysis.description, enhancedAnalysis.sport, enhancedAnalysis.useCase, enhancedAnalysis.language, connectors, 'text');
+        const promptYaml = generatePromptYaml(promptName, enhancedAnalysis.description, enhancedAnalysis.sport, enhancedAnalysis.useCase, enhancedAnalysis.language, 'text', true);
+        const installYaml = generateInstallYaml(promptName, workflowName);
+        
+        // Step 6: Validate the generated configuration
+        let workflowConfig: any;
+        try {
+          workflowConfig = yaml.load(workflowYaml);
+        } catch (e) {
+          throw new Error(`Generated workflow YAML is invalid: ${e}`);
+        }
+        
+        const validation = validateWorkflowConfig(workflowConfig, 'dev');
+        
+        // Step 7: Generate deployment guide
+        const deploymentGuide = generateDeploymentGuide(sanitizedName, connectors, enhancedAnalysis);
+        
+        // Step 8: Generate testing scenarios
+        const testingScenarios = generateTestingScenarios(enhancedAnalysis);
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `# Complete Machina Agent Solution: ${finalAgentName}
+
+## 🎯 Agent Overview
+
+**Description**: ${enhancedAnalysis.description}
+**Sport Focus**: ${enhancedAnalysis.sport}
+**Use Case**: ${enhancedAnalysis.useCase}
+**Language**: ${enhancedAnalysis.language}
+**Complexity**: ${enhancedAnalysis.complexity}
+
+## 📊 Requirements Analysis
+
+${enhancedAnalysis.summary}
+
+### Key Features
+${enhancedAnalysis.features ? enhancedAnalysis.features.map((f: string) => `- ${f}`).join('\n') : '- Standard agent functionality based on use case'}
+
+### Connectors Required
+${connectors.map(connector => `- **${connector}**: ${getConnectorDescription(connector)}`).join('\n')}
+
+## 📁 Generated Files
+
+### 1. _install.yml
+\`\`\`yaml
+${installYaml}
+\`\`\`
+
+### 2. ${workflowName}.yml
+\`\`\`yaml
+${workflowYaml}
+\`\`\`
+
+### 3. ${promptName}.yml
+\`\`\`yaml
+${promptYaml}
+\`\`\`
+
+## ✅ Configuration Validation
+
+**Validation Score**: ${validation.score}/100
+
+${validation.issues.length > 0 ? `### Issues Found
+${validation.issues.map(issue => `- **${issue.severity}**: ${issue.message}`).join('\n')}` : '✅ No configuration issues found'}
+
+${validation.recommendations.length > 0 ? `### Recommendations
+${validation.recommendations.map(rec => `- ${rec}`).join('\n')}` : ''}
+
+## 🚀 Deployment Guide
+
+${deploymentGuide}
+
+## 🧪 Testing Scenarios
+
+${testingScenarios}
+
+## 📈 Performance Estimates
+
+- **Estimated execution time**: ${estimateExecutionTime(workflowConfig)}
+- **Estimated token usage**: ${estimateTokenUsage(workflowConfig)}
+- **Recommended rate limits**: ${getRecommendedRateLimits(workflowConfig, 'dev')}
+
+## 🔧 Customization Options
+
+### Easy Customizations
+- Modify prompt instructions for different tone or style
+- Adjust output format (text, JSON, HTML, Markdown)
+- Add or remove specific data fields in the schema
+
+### Advanced Customizations
+- Add additional workflow tasks for data processing
+- Integrate with more connectors for enhanced functionality
+- Implement conditional logic for different scenarios
+- Add error handling and retry mechanisms
+
+## 🎯 Next Steps
+
+1. **Create Directory**: \`mkdir agent-templates/${sanitizedName}\`
+2. **Save Files**: Copy the three YAML files above into the directory
+3. **Install Connectors**: Ensure required connectors are available
+4. **Configure Environment**: Set up the required API keys
+5. **Deploy**: Upload to your Machina Studio instance
+6. **Test**: Run the testing scenarios to verify functionality
+7. **Optimize**: Fine-tune based on real-world usage
+
+Your complete agent solution is ready for deployment! 🎉`,
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error("Error creating complete agent:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating complete agent: ${error.message || String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Helper function to incorporate custom features
+  function incorporateCustomFeatures(analysis: any, customFeatures?: string) {
+    if (!customFeatures) return analysis;
+    
+    const features = customFeatures.toLowerCase();
+    const enhancedAnalysis = { ...analysis };
+    
+    // Parse custom features and update analysis
+    if (features.includes('real-time') || features.includes('live')) {
+      enhancedAnalysis.complexity = 'complex';
+      enhancedAnalysis.features = [...(enhancedAnalysis.features || []), 'Real-time data processing'];
+    }
+    
+    if (features.includes('multi-language') || features.includes('multilingual')) {
+      enhancedAnalysis.features = [...(enhancedAnalysis.features || []), 'Multi-language support'];
+    }
+    
+    if (features.includes('social') || features.includes('twitter') || features.includes('instagram')) {
+      enhancedAnalysis.features = [...(enhancedAnalysis.features || []), 'Social media integration'];
+    }
+    
+    if (features.includes('email') || features.includes('newsletter')) {
+      enhancedAnalysis.features = [...(enhancedAnalysis.features || []), 'Email/newsletter generation'];
+    }
+    
+    if (features.includes('seo') || features.includes('search optimization')) {
+      enhancedAnalysis.features = [...(enhancedAnalysis.features || []), 'SEO optimization'];
+    }
+    
+    if (features.includes('analytics') || features.includes('tracking')) {
+      enhancedAnalysis.features = [...(enhancedAnalysis.features || []), 'Analytics and tracking'];
+    }
+    
+    // Update description to include custom features
+    if (enhancedAnalysis.features && enhancedAnalysis.features.length > 0) {
+      enhancedAnalysis.description = `${analysis.description} with enhanced features: ${enhancedAnalysis.features.join(', ')}`;
+    }
+    
+    return enhancedAnalysis;
+  }
+
+  // Helper function to generate deployment guide
+  function generateDeploymentGuide(agentName: string, connectors: string[], analysis: any): string {
+    return `### Step-by-Step Deployment
+
+1. **Prerequisites**
+   - Machina Studio account with appropriate permissions
+   - Required API keys for connectors
+   - Basic knowledge of YAML configuration
+
+2. **Environment Setup**
+   \`\`\`bash
+   # Create agent directory
+   mkdir -p agent-templates/${agentName}
+   cd agent-templates/${agentName}
+   \`\`\`
+
+3. **Configuration Files**
+   - Save the three YAML files in the agent directory
+   - Verify file naming matches the install.yml references
+
+4. **Environment Variables**
+   Configure these in your Machina Studio:
+   \`\`\`
+   MACHINA_CONTEXT_VARIABLE_OPENAI_API_KEY=your_openai_key
+   ${connectors.includes('sportradar-soccer') || connectors.includes('sportradar-nba') || connectors.includes('sportradar-nfl') ? 'MACHINA_CONTEXT_VARIABLE_SPORTRADAR_API_KEY=your_sportradar_key' : ''}
+   ${connectors.includes('stability') ? 'MACHINA_CONTEXT_VARIABLE_STABILITY_API_KEY=your_stability_key' : ''}
+   ${connectors.includes('perplexity') ? 'MACHINA_CONTEXT_VARIABLE_PERPLEXITY_API_KEY=your_perplexity_key' : ''}
+   \`\`\`
+
+5. **Connector Installation**
+   Ensure these connectors are installed in your Machina instance:
+   ${connectors.map(conn => `   - ${conn}`).join('\n')}
+
+6. **Upload and Deploy**
+   - Upload the agent template to Machina Studio
+   - Run initial tests in development environment
+   - Monitor logs for any configuration issues
+
+7. **Production Deployment**
+   - Test thoroughly in staging environment
+   - Configure appropriate rate limits
+   - Set up monitoring and alerting
+   - Deploy to production with gradual rollout`;
+  }
+
+  // Helper function to generate testing scenarios
+  function generateTestingScenarios(analysis: any): string {
+    const sport = analysis.sport;
+    const useCase = analysis.useCase;
+    
+    return `### Basic Testing Scenarios
+
+#### Scenario 1: Basic Functionality Test
+\`\`\`json
+{
+  "entity_name": "${sport === 'soccer' ? 'Manchester United' : sport === 'nba' ? 'Lakers' : sport === 'nfl' ? 'Patriots' : 'Team Name'}",
+  "date_range": "recent"
+}
+\`\`\`
+**Expected**: Should generate ${useCase} content for the specified team
+
+#### Scenario 2: Event-Specific Test
+\`\`\`json
+{
+  "event_code": "sr:match:12345",
+  "entity_name": "${sport === 'soccer' ? 'Barcelona' : sport === 'nba' ? 'Warriors' : sport === 'nfl' ? 'Cowboys' : 'Team Name'}"
+}
+\`\`\`
+**Expected**: Should generate content for the specific event
+
+#### Scenario 3: Custom Parameters Test
+\`\`\`json
+{
+  "entity_name": "${sport === 'soccer' ? 'Real Madrid' : sport === 'nba' ? 'Celtics' : sport === 'nfl' ? 'Giants' : 'Team Name'}",
+  "date_range": "last_5_games",
+  "custom_params": {
+    "include_statistics": true,
+    "analysis_depth": "comprehensive"
+  }
+}
+\`\`\`
+**Expected**: Should generate detailed content with enhanced analysis
+
+### Error Handling Tests
+
+#### Test Empty Input
+\`\`\`json
+{}
+\`\`\`
+**Expected**: Should handle gracefully or provide appropriate error message
+
+#### Test Invalid Event Code
+\`\`\`json
+{
+  "event_code": "invalid_code",
+  "entity_name": "Test Team"
+}
+\`\`\`
+**Expected**: Should fallback to general team analysis
+
+### Performance Tests
+
+- Monitor execution time for each scenario
+- Check token usage and costs
+- Verify rate limiting behavior
+- Test concurrent request handling`;
+  }
+
   return server;
 };
