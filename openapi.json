@@ -1,0 +1,2770 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Machina Sports SDK",
+    "description": "Machina Sports API for seamless AI integration in sports, offering real-time insights, personalized content, and fan sentiment analysis.",
+    "version": "1.0",
+    "termsOfService": "http://machina.gg/tos/",
+    "contact": {
+      "email": "support@machina.gg"
+    },
+    "license": {
+      "name": "Apache 2.0",
+      "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{api-address}.org.machina.gg",
+      "description": "Production server",
+      "variables": {
+        "api-address": {
+          "default": "https://api.machina.gg",
+          "description": "Your api-address"
+        }
+      }
+    },
+    {
+      "url": "http://local.machina:5001",
+      "description": "Local development server"
+    }
+  ],
+  "security": [
+    {
+      "ApiToken": []
+    }
+  ],
+  "paths": {
+    "/agent": {
+      "post": {
+        "summary": "Create Agent",
+        "description": "Create a new agent and define its configurations.",
+        "operationId": "createAgent",
+        "tags": [
+          "agents"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "title", "description"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Unique identifier for the agent"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Display title of the agent"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Detailed description of the agent's purpose"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Configuration settings for the agent"
+                  },
+                  "workflows": {
+                    "type": "array",
+                    "description": "Array of workflow definitions",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "Name of the workflow"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the workflow"
+                        },
+                        "condition": {
+                          "type": "string",
+                          "description": "Condition for workflow execution"
+                        },
+                        "outputs": {
+                          "type": "object",
+                          "description": "Output mappings for the workflow"
+                        }
+                      }
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "inactive"],
+                    "default": "active",
+                    "description": "Current status of the agent"
+                  }
+                },
+                "example": {
+                  "name": "my-new-agent",
+                  "title": "My New Agent",
+                  "description": "Your agent description",
+                  "context": {
+                    "config-frequency": 0.04
+                  },
+                  "workflows": [
+                    {
+                      "name": "sync-nba-embeds",
+                      "description": "sync-nba-embeds",
+                      "inputs": {
+                        "event_code": "$.get('event_code') or None"
+                      },
+                      "outputs": {
+                        "sync-nba-embeds-status": "$.get('workflow-status', False)"
+                      }
+                    }
+                  ],
+                  "status": "inactive"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Unique identifier of the created agent",
+                          "example": "67db52c32ae92018b93310a1"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "example": 200
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["success"],
+                      "example": "success"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/agent/executor/id/{id}": {
+      "post": {
+        "summary": "Execute Agent by ID",
+        "description": "Execute an agent using its unique identifier.",
+        "operationId": "executeAgentById",
+        "tags": [
+          "agents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the agent to execute",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agent-config": {
+                    "type": "object",
+                    "properties": {
+                      "delay": {
+                        "type": "boolean",
+                        "description": "Whether to execute the agent asynchronously",
+                        "default": true
+                      }
+                    },
+                    "description": "Configuration options for the execution"
+                  },
+                  "input": {
+                    "type": "object",
+                    "description": "Input parameters for the agent execution"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Additional context data for the agent execution"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent execution result or status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "description": "Unique identifier for the execution",
+                      "example": "67db5c012ae92018b93310a4"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Status of the execution",
+                      "enum": ["scheduled", "completed", "failed"],
+                      "example": "scheduled"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Informational message about the execution",
+                      "example": "Agent execution scheduled successfully"
+                    },
+                    "result": {
+                      "type": "object",
+                      "description": "The result of the agent execution (if immediate)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input parameters"
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/agent/executor/{name}": {
+      "post": {
+        "summary": "Execute Agent by Name",
+        "description": "Execute an agent using its unique name",
+        "operationId": "executeAgentByName",
+        "tags": [
+          "agents"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Unique name of the agent to execute",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agent-config": {
+                    "type": "object",
+                    "properties": {
+                      "delay": {
+                        "type": "boolean",
+                        "description": "Whether to execute the agent asynchronously",
+                        "default": true
+                      }
+                    },
+                    "description": "Configuration options for the execution"
+                  },
+                  "input": {
+                    "type": "object",
+                    "description": "Input parameters for the agent execution"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Additional context data for the agent execution"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent execution result or status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "description": "Unique identifier for the execution",
+                      "example": "67db5c012ae92018b93310a4"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Status of the execution",
+                      "enum": ["scheduled", "completed", "failed"],
+                      "example": "scheduled"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Informational message about the execution",
+                      "example": "Agent execution scheduled successfully"
+                    },
+                    "result": {
+                      "type": "object",
+                      "description": "The result of the agent execution (if immediate)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input parameters"
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/agent/{id}": {
+      "delete": {
+        "summary": "Delete Agent",
+        "description": "Delete an agent by its ID.",
+        "operationId": "deleteAgent",
+        "tags": [
+          "agents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the agent to delete",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Unique identifier of the deleted agent",
+                          "example": "67e09cb441dc71ef8db3992f"
+                        }
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Success message",
+                      "example": "agent deleted"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Agent",
+        "description": "Update an existing agent by its ID.",
+        "operationId": "updateAgent",
+        "tags": [
+          "agents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the agent to update",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "Updated display title of the agent"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Updated description of the agent's purpose"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "inactive"],
+                    "description": "Updated status of the agent"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Updated configuration settings for the agent"
+                  },
+                  "workflows": {
+                    "type": "array",
+                    "description": "Updated list of workflows associated with the agent"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "description": "Success message",
+                      "example": "agent updated"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/agent/id/{id}": {
+      "get": {
+        "summary": "Get Agent by ID",
+        "description": "Retrieve an agent by its unique ID.",
+        "operationId": "getAgentById",
+        "tags": [
+          "agents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the agent",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the agent",
+                          "example": "67e09cb441dc71ef8db3992f"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the agent",
+                          "example": "my-new-agent"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Display title of the agent",
+                          "example": "My New Agent"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the agent's purpose",
+                          "example": "Your agent description"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "inactive"],
+                          "description": "Current status of the agent",
+                          "example": "inactive"
+                        },
+                        "context": {
+                          "type": "object",
+                          "description": "Configuration settings for the agent",
+                          "example": {
+                            "config-frequency": 0.04
+                          }
+                        },
+                        "workflows": {
+                          "type": "array",
+                          "description": "List of workflows associated with the agent",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "description": "Name of the workflow",
+                                "example": "sync-nba-embeds"
+                              },
+                              "description": {
+                                "type": "string",
+                                "description": "Description of the workflow",
+                                "example": "sync-nba-embeds"
+                              },
+                              "inputs": {
+                                "type": "object",
+                                "description": "Input mappings for the workflow",
+                                "example": {
+                                  "event_code": "$.get('event_code') or None"
+                                }
+                              },
+                              "outputs": {
+                                "type": "object",
+                                "description": "Output mappings for the workflow",
+                                "example": {
+                                  "sync-nba-embeds-status": "$.get('workflow-status', False)"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp",
+                          "example": "Sun, 23 Mar 2025 23:43:48 GMT"
+                        },
+                        "updated": {
+                          "type": "string",
+                          "description": "Last update timestamp",
+                          "example": "Mon, 24 Mar 2025 00:21:10 GMT"
+                        },
+                        "last_execution": {
+                          "type": "string",
+                          "description": "Timestamp of the last execution",
+                          "example": "Mon, 24 Mar 2025 00:21:10 GMT"
+                        },
+                        "processing": {
+                          "type": "boolean",
+                          "description": "Whether the agent is currently processing",
+                          "example": false
+                        },
+                        "scheduled": {
+                          "type": "boolean",
+                          "description": "Whether the agent is scheduled for execution",
+                          "example": false
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/agent/search": {
+      "post": {
+        "summary": "Search Agents",
+        "description": "Search for an agent using sort, filter and pagination.",
+        "operationId": "searchAgents",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filters": {
+                    "type": "object",
+                    "description": "Query filters object",
+                    "default": {}
+                  },
+                  "sorters": {
+                    "type": "array",
+                    "description": "Array containing field name and sort direction",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": ["_id", -1],
+                    "example": ["name", 1]
+                  },
+                  "page": {
+                    "type": "integer",
+                    "description": "Page number (starts from 1)",
+                    "default": 1
+                  },
+                  "page_size": {
+                    "type": "integer",
+                    "description": "Number of items per page",
+                    "default": 10
+                  }
+                },
+                "example": {
+                  "filters": {},
+                  "sorters": ["name", 1],
+                  "page": 1,
+                  "page_size": 10
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "_id": {
+                            "type": "string",
+                            "description": "Unique identifier of the agent",
+                            "example": "67e09cb441dc71ef8db3992f"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "Unique name of the agent",
+                            "example": "my-new-agent"
+                          },
+                          "title": {
+                            "type": "string",
+                            "description": "Display title of the agent",
+                            "example": "My New Agent"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Description of the agent's purpose",
+                            "example": "Your agent description"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "inactive"],
+                            "description": "Current status of the agent",
+                            "example": "inactive"
+                          },
+                          "context": {
+                            "type": "object",
+                            "description": "Configuration settings for the agent",
+                            "example": {
+                              "config-frequency": 0.04
+                            }
+                          },
+                          "workflows": {
+                            "type": "array",
+                            "description": "List of workflows associated with the agent",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "description": "Name of the workflow",
+                                  "example": "sync-nba-embeds"
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "description": "Description of the workflow",
+                                  "example": "sync-nba-embeds"
+                                },
+                                "inputs": {
+                                  "type": "object",
+                                  "description": "Input mappings for the workflow",
+                                  "example": {
+                                    "event_code": "$.get('event_code') or None"
+                                  }
+                                },
+                                "outputs": {
+                                  "type": "object",
+                                  "description": "Output mappings for the workflow",
+                                  "example": {
+                                    "sync-nba-embeds-status": "$.get('workflow-status', False)"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "created": {
+                            "type": "string",
+                            "description": "Creation timestamp",
+                            "example": "Sun, 23 Mar 2025 23:43:48 GMT"
+                          },
+                          "date": {
+                            "type": "string",
+                            "description": "Date of creation",
+                            "example": "Sun, 23 Mar 2025 23:43:48 GMT"
+                          }
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    },
+                    "total_documents": {
+                      "type": "integer",
+                      "description": "Total number of documents matching the query",
+                      "example": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agent/{name}": {
+      "get": {
+        "summary": "Get Agent by Name",
+        "description": "Retrieve an agent by its unique name.",
+        "operationId": "getAgentByName",
+        "tags": [
+          "agents"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Unique name of the agent",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the agent",
+                          "example": "67e09cb441dc71ef8db3992f"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the agent",
+                          "example": "my-new-agent"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Display title of the agent",
+                          "example": "My New Agent"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the agent's purpose",
+                          "example": "Your agent description"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "inactive"],
+                          "description": "Current status of the agent",
+                          "example": "inactive"
+                        },
+                        "context": {
+                          "type": "object",
+                          "description": "Configuration settings for the agent",
+                          "example": {
+                            "config-frequency": 0.04
+                          }
+                        },
+                        "workflows": {
+                          "type": "array",
+                          "description": "List of workflows associated with the agent",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "description": "Name of the workflow",
+                                "example": "sync-nba-embeds"
+                              },
+                              "description": {
+                                "type": "string",
+                                "description": "Description of the workflow",
+                                "example": "sync-nba-embeds"
+                              },
+                              "inputs": {
+                                "type": "object",
+                                "description": "Input mappings for the workflow",
+                                "example": {
+                                  "event_code": "$.get('event_code') or None"
+                                }
+                              },
+                              "outputs": {
+                                "type": "object",
+                                "description": "Output mappings for the workflow",
+                                "example": {
+                                  "sync-nba-embeds-status": "$.get('workflow-status', False)"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp",
+                          "example": "Sun, 23 Mar 2025 23:43:48 GMT"
+                        },
+                        "updated": {
+                          "type": "string",
+                          "description": "Last update timestamp",
+                          "example": "Mon, 24 Mar 2025 00:21:10 GMT"
+                        },
+                        "last_execution": {
+                          "type": "string",
+                          "description": "Timestamp of the last execution",
+                          "example": "Mon, 24 Mar 2025 00:21:10 GMT"
+                        },
+                        "processing": {
+                          "type": "boolean",
+                          "description": "Whether the agent is currently processing",
+                          "example": false
+                        },
+                        "scheduled": {
+                          "type": "boolean",
+                          "description": "Whether the agent is scheduled for execution",
+                          "example": false
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/document": {
+      "post": {
+        "summary": "Create Document",
+        "description": "Create a new document and configure metadata and properties.",
+        "operationId": "createDocument",
+        "tags": [
+          "documents"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Unique identifier for the document"
+                  },
+                  "value": {
+                    "type": "object",
+                    "description": "The main data of the document, can be any type (string, object, array, etc.)"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "description": "Additional metadata for the document"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "draft", "archived"],
+                    "default": "active",
+                    "description": "Current status of the document"
+                  },
+                  "embed-vector": {
+                    "type": "boolean",
+                    "description": "Whether to create a vector embedding for the document"
+                  }
+                },
+                "example": {
+                  "embed-vector": false,
+                  "metadata": {
+                    "agent_id": "123"
+                  },
+                  "name": "New test document",
+                  "value": {
+                    "chat": [
+                      "What is Lorem Ipsum?",
+                      "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.",
+                      " It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the created document"
+                        },
+                        "id": {
+                          "type": "string",
+                          "description": "Unique identifier of the created document (duplicate)"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the document"
+                        },
+                        "value": {
+                          "type": "object",
+                          "description": "The main data of the document"
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "description": "Additional metadata for the document"
+                        },
+                        "status": {
+                          "type": "string",
+                          "description": "Current status of the document"
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp"
+                        },
+                        "updated": {
+                          "type": "string",
+                          "description": "Update timestamp"
+                        },
+                        "embed-vector": {
+                          "type": "boolean",
+                          "description": "Whether a vector embedding was created"
+                        }
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Success message"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  },
+                  "example": {
+                    "data": {
+                      "_id": "67e1fc8c2a5ade8c69c03fe7",
+                      "created": "Tue, 25 Mar 2025 00:45:00 GMT",
+                      "embed-vector": false,
+                      "id": "67e1fc8c2a5ade8c69c03fe7",
+                      "metadata": {
+                        "agent_id": "123"
+                      },
+                      "name": "New test document",
+                      "status": null,
+                      "updated": "Tue, 25 Mar 2025 00:45:00 GMT",
+                      "value": {
+                        "chat": [
+                          "What is Lorem Ipsum?",
+                          "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.",
+                          " It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                        ]
+                      }
+                    },
+                    "message": "document saved",
+                    "status": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/document/{id}": {
+      "get": {
+        "summary": "Get Document by ID",
+        "description": "Retrieve a document by its unique ID.",
+        "operationId": "getDocumentById",
+        "tags": [
+          "documents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the document",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the document",
+                          "example": "67e1fc8c2a5ade8c69c03fe7"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the document",
+                          "example": "New test document"
+                        },
+                        "value": {
+                          "type": "object",
+                          "description": "The main data of the document",
+                          "example": {
+                            "chat": [
+                              "What is Lorem Ipsum?",
+                              "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.",
+                              " It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                            ]
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "description": "Additional metadata for the document",
+                          "example": {
+                            "agent_id": "123"
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "description": "Current status of the document",
+                          "example": null
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp",
+                          "example": "Tue, 25 Mar 2025 00:45:00 GMT"
+                        },
+                        "updated": {
+                          "type": "string",
+                          "description": "Update timestamp",
+                          "example": "Tue, 25 Mar 2025 00:45:00 GMT"
+                        },
+                        "embed-vector": {
+                          "type": "boolean",
+                          "description": "Whether a vector embedding was created",
+                          "example": false
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  },
+                  "example": {
+                    "data": {
+                      "_id": "67e1fc8c2a5ade8c69c03fe7",
+                      "created": "Tue, 25 Mar 2025 00:45:00 GMT",
+                      "embed-vector": false,
+                      "metadata": {
+                        "agent_id": "123"
+                      },
+                      "name": "New test document",
+                      "status": null,
+                      "updated": "Tue, 25 Mar 2025 00:45:00 GMT",
+                      "value": {
+                        "chat": [
+                          "What is Lorem Ipsum?",
+                          "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.",
+                          " It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                        ]
+                      }
+                    },
+                    "status": true
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Document",
+        "description": "Modify an existing document's data and properties by its unique ID.",
+        "operationId": "updateDocument",
+        "tags": [
+          "documents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the document to update",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "object",
+                    "description": "The main data of the document, can be any type (string, object, array, etc.)",
+                    "example": {
+                      "messages": [
+                        {
+                          "content": "How do the odds look for Man City vs Real Madrid?",
+                          "date": "2024-12-07T23:09:39.784Z",
+                          "role": "user"
+                        },
+                        {
+                          "content": "Manchester City vs Real Madrid",
+                          "date": "2024-12-07T23:11:39.784Z",
+                          "role": "assistant"
+                        }
+                      ]
+                    }
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "description": "Additional metadata for the document"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "draft", "archived"],
+                    "description": "Updated status of the document"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the document",
+                          "example": "67e1fc8c2a5ade8c69c03fe7"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the document",
+                          "example": "New test document"
+                        },
+                        "value": {
+                          "type": "object",
+                          "description": "Updated main data of the document",
+                          "example": {
+                            "messages": [
+                              {
+                                "content": "How do the odds look for Man City vs Real Madrid?",
+                                "date": "2024-12-07T23:09:39.784Z",
+                                "role": "user"
+                              },
+                              {
+                                "content": "Manchester City vs Real Madrid",
+                                "date": "2024-12-07T23:11:39.784Z",
+                                "role": "assistant"
+                              }
+                            ]
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "description": "Updated metadata for the document",
+                          "example": {
+                            "agent_id": "123"
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "description": "Updated status of the document",
+                          "example": null
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp",
+                          "example": "Tue, 25 Mar 2025 00:45:00 GMT"
+                        },
+                        "updated": {
+                          "type": "string",
+                          "description": "Update timestamp",
+                          "example": "Tue, 25 Mar 2025 01:54:59 GMT"
+                        },
+                        "embed-vector": {
+                          "type": "boolean",
+                          "description": "Whether a vector embedding was created",
+                          "example": false
+                        }
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Success message",
+                      "example": "document updated"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  },
+                  "example": {
+                    "data": {
+                      "_id": "67e1fc8c2a5ade8c69c03fe7",
+                      "created": "Tue, 25 Mar 2025 00:45:00 GMT",
+                      "embed-vector": false,
+                      "metadata": {
+                        "agent_id": "123"
+                      },
+                      "name": "New test document",
+                      "status": null,
+                      "updated": "Tue, 25 Mar 2025 01:54:59 GMT",
+                      "value": {
+                        "messages": [
+                          {
+                            "content": "How do the odds look for Man City vs Real Madrid?",
+                            "date": "2024-12-07T23:09:39.784Z",
+                            "role": "user"
+                          },
+                          {
+                            "content": "Manchester City vs Real Madrid",
+                            "date": "2024-12-07T23:11:39.784Z",
+                            "role": "assistant"
+                          }
+                        ]
+                      }
+                    },
+                    "message": "document updated",
+                    "status": true
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Document",
+        "description": "Remove an existing document by its unique ID.",
+        "operationId": "deleteDocument",
+        "tags": [
+          "documents"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the document to delete",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Unique identifier of the deleted document",
+                          "example": "67e1f9412a5ade8c69c03fe3"
+                        }
+                      }
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Success message",
+                      "example": "document deleted"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  },
+                  "example": {
+                    "data": {
+                      "id": "67e1f9412a5ade8c69c03fe3"
+                    },
+                    "message": "document deleted",
+                    "status": true
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/document/search": {
+      "post": {
+        "summary": "Search Documents",
+        "description": "Search for documents using sort, filter and pagination.",
+        "operationId": "searchDocuments",
+        "tags": [
+          "documents"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filters": {
+                    "type": "object",
+                    "description": "Filter criteria for the search",
+                    "default": {},
+                    "example": {}
+                  },
+                  "sorters": {
+                    "type": "array",
+                    "description": "Sorting instructions (field name and direction)",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": ["_id", -1],
+                    "example": ["name", 1]
+                  },
+                  "page": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Page number for pagination",
+                    "example": 1
+                  },
+                  "page_size": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Number of results per page",
+                    "example": 10
+                  }
+                },
+                "example": {
+                  "filters": {},
+                  "sorters": ["name", 1],
+                  "page": 1,
+                  "page_size": 10
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "_id": {
+                            "type": "string",
+                            "description": "Unique identifier of the document",
+                            "example": "67e1fc8c2a5ade8c69c03fe7"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "Unique name of the document",
+                            "example": "New test document"
+                          },
+                          "value": {
+                            "type": "object",
+                            "description": "The main data of the document",
+                            "example": {
+                              "chat": [
+                                "What is Lorem Ipsum?",
+                                "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.",
+                                " It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                              ]
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "description": "Additional metadata for the document",
+                            "example": {
+                              "agent_id": "123"
+                            }
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "Current status of the document",
+                            "example": null
+                          },
+                          "created": {
+                            "type": "string",
+                            "description": "Creation timestamp",
+                            "example": "Tue, 25 Mar 2025 00:45:00 GMT"
+                          },
+                          "updated": {
+                            "type": "string",
+                            "description": "Update timestamp",
+                            "example": "Tue, 25 Mar 2025 00:45:00 GMT"
+                          },
+                          "date": {
+                            "type": "string",
+                            "description": "Document date derived from ID",
+                            "example": "Tue, 25 Mar 2025 00:45:00 GMT"
+                          },
+                          "embed-vector": {
+                            "type": "boolean",
+                            "description": "Whether a vector embedding was created",
+                            "example": false
+                          }
+                        }
+                      },
+                      "description": "Array of matching documents"
+                    },
+                    "total_documents": {
+                      "type": "integer",
+                      "description": "Total number of matching documents",
+                      "example": 4
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status",
+                      "example": true
+                    }
+                  },
+                  "example": {
+                    "data": [
+                      {
+                        "_id": "67e1fc8c2a5ade8c69c03fe7",
+                        "created": "Tue, 25 Mar 2025 00:45:00 GMT",
+                        "date": "Tue, 25 Mar 2025 00:45:00 GMT",
+                        "embed-vector": false,
+                        "metadata": {
+                          "agent_id": "123"
+                        },
+                        "name": "New test document",
+                        "status": null,
+                        "updated": "Tue, 25 Mar 2025 00:45:00 GMT",
+                        "value": {
+                          "chat": [
+                            "What is Lorem Ipsum?",
+                            "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.",
+                            " It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                          ]
+                        }
+                      }
+                    ],
+                    "status": true,
+                    "total_documents": 4
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid search parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow": {
+      "post": {
+        "summary": "Create Workflow",
+        "description": "Create a new workflow and configure its parameters.",
+        "operationId": "createWorkflow",
+        "tags": [
+          "workflows"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "title", "description"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Unique identifier for the workflow"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Display title of the workflow"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Detailed description of the workflow's purpose"
+                  },
+                  "context-variables": {
+                    "type": "object",
+                    "description": "Configuration settings and API keys for the workflow"
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "description": "Input parameters for the workflow with default values or expressions"
+                  },
+                  "outputs": {
+                    "type": "object",
+                    "description": "Output mappings for the workflow using expressions",
+                    "required": ["workflow-status"],
+                    "properties": {
+                      "workflow-status": {
+                        "type": "string",
+                        "description": "Expression that evaluates to 'executed', 'skipped', or 'failed'",
+                        "example": "$.get('event_exists') is not True and 'skipped' or 'executed'"
+                      }
+                    }
+                  },
+                  "tasks": {
+                    "type": "array",
+                    "description": "Array of task definitions that make up the workflow",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "description": "Type of task (connector, document, ai, transform, condition)",
+                          "enum": ["connector", "document", "ai", "transform", "condition"]
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Name of the task"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the task's purpose"
+                        },
+                        "condition": {
+                          "type": "string",
+                          "description": "Condition for task execution (optional)"
+                        },
+                        "inputs": {
+                          "type": "object",
+                          "description": "Input mappings for the task"
+                        },
+                        "outputs": {
+                          "type": "object",
+                          "description": "Output mappings for the task"
+                        }
+                      }
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "inactive"],
+                    "default": "active",
+                    "description": "Current status of the workflow"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workflow created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the created workflow"
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/{id}": {
+      "get": {
+        "summary": "Get Workflow by ID",
+        "description": "Retrieve a workflow by its unique ID.",
+        "operationId": "getWorkflowById",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the workflow",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the workflow"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the workflow"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Display title of the workflow"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the workflow's purpose"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "inactive"],
+                          "description": "Current status of the workflow"
+                        },
+                        "context": {
+                          "type": "object",
+                          "description": "Configuration settings for the workflow"
+                        },
+                        "inputs": {
+                          "type": "object",
+                          "description": "Input parameters for the workflow"
+                        },
+                        "outputs": {
+                          "type": "object",
+                          "description": "Output mappings for the workflow"
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp"
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Workflow",
+        "description": "Update an existing workflow by its ID.",
+        "operationId": "updateWorkflow",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the workflow to update",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "Updated display title of the workflow"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Updated description of the workflow's purpose"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "inactive"],
+                    "description": "Updated status of the workflow"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Updated configuration settings for the workflow"
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "description": "Updated input parameters for the workflow"
+                  },
+                  "outputs": {
+                    "type": "object",
+                    "description": "Updated output mappings for the workflow"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the workflow"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the workflow"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Display title of the workflow"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the workflow's purpose"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "inactive"],
+                          "description": "Current status of the workflow"
+                        },
+                        "updated": {
+                          "type": "string",
+                          "description": "Last update timestamp"
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Workflow",
+        "description": "Remove an existing workflow by its unique ID.",
+        "operationId": "deleteWorkflow",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the workflow to delete",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Success message"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/id/{id}": {
+      "get": {
+        "summary": "Get Workflow by ID",
+        "description": "Retrieve a workflow by its unique ID.",
+        "operationId": "getWorkflowById",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the workflow",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the workflow"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the workflow"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Display title of the workflow"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the workflow's purpose"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "inactive"],
+                          "description": "Current status of the workflow"
+                        },
+                        "context": {
+                          "type": "object",
+                          "description": "Configuration settings for the workflow"
+                        },
+                        "inputs": {
+                          "type": "object",
+                          "description": "Input parameters for the workflow"
+                        },
+                        "outputs": {
+                          "type": "object",
+                          "description": "Output mappings for the workflow"
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp"
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/{name}": {
+      "get": {
+        "summary": "Get Workflow by Name",
+        "description": "Retrieve a workflow by its unique name.",
+        "operationId": "getWorkflowByName",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Unique name of the workflow",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the workflow"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Unique name of the workflow"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Display title of the workflow"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the workflow's purpose"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "inactive"],
+                          "description": "Current status of the workflow"
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Creation timestamp"
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/search": {
+      "post": {
+        "summary": "Search Workflows",
+        "description": "Search for workflows using sort, filter and pagination.",
+        "operationId": "searchWorkflows",
+        "tags": [
+          "workflows"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filters": {
+                    "type": "object",
+                    "description": "Query filters object",
+                    "default": {}
+                  },
+                  "sorters": {
+                    "type": "array",
+                    "description": "Array containing field name and sort direction",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": ["name", 1],
+                    "example": ["name", 1]
+                  },
+                  "page": {
+                    "type": "integer",
+                    "description": "Page number (starts from 1)",
+                    "default": 1
+                  },
+                  "page_size": {
+                    "type": "integer",
+                    "description": "Number of items per page",
+                    "default": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "_id": {
+                            "type": "string",
+                            "description": "Unique identifier of the workflow"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "Unique name of the workflow"
+                          },
+                          "title": {
+                            "type": "string",
+                            "description": "Display title of the workflow"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Description of the workflow's purpose"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "inactive"],
+                            "description": "Current status of the workflow"
+                          },
+                          "created": {
+                            "type": "string",
+                            "description": "Creation timestamp"
+                          }
+                        }
+                      },
+                      "description": "Array of matching workflows"
+                    },
+                    "total_documents": {
+                      "type": "integer",
+                      "description": "Total number of matching workflows"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  },
+                  "example": {
+                    "data": [
+                      {
+                        "_id": "67db52c32ae92018b93310a1",
+                        "created": "Wed, 20 Mar 2025 14:30:00 GMT",
+                        "name": "thread",
+                        "value": {
+                          "messages": ["test"]
+                        },
+                        "metadata": {
+                          "agent_id": "123"
+                        },
+                        "status": "active",
+                        "date": "Wed, 20 Mar 2025 14:30:00 GMT"
+                      }
+                    ],
+                    "total_documents": 15,
+                    "status": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/executor/id/{id}": {
+      "post": {
+        "summary": "Execute Workflow by ID",
+        "description": "Trigger a workflow run by its unique ID.",
+        "operationId": "executeWorkflowById",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Unique ID of the workflow to execute",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "skip_delay": {
+                    "type": "boolean",
+                    "description": "Whether to execute the workflow immediately",
+                    "default": false
+                  },
+                  "input": {
+                    "type": "object",
+                    "description": "Input parameters for the workflow execution"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Additional context data for the workflow execution"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow execution result or status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer",
+                      "description": "HTTP status code"
+                    },
+                    "data": {
+                      "type": "object",
+                      "description": "Execution result data"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input parameters"
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/executor/{name}": {
+      "post": {
+        "summary": "Execute Workflow by Name",
+        "description": "Trigger a workflow run by its unique name.",
+        "operationId": "executeWorkflowByName",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Unique name of the workflow to execute",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "skip_delay": {
+                    "type": "boolean",
+                    "description": "Whether to execute the workflow immediately",
+                    "default": false
+                  },
+                  "input": {
+                    "type": "object",
+                    "description": "Input parameters for the workflow execution"
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Additional context data for the workflow execution"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow execution result or status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer",
+                      "description": "HTTP status code"
+                    },
+                    "data": {
+                      "type": "object",
+                      "description": "Execution result data"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input parameters"
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/execute/{name}": {
+      "post": {
+        "summary": "Execute Workflow by Name (Immediate)",
+        "description": "Execute a workflow immediately by its name.",
+        "operationId": "executeWorkflowByNameImmediate",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Unique name of the workflow to execute",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Context data for the workflow execution"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Execution result data"
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/workflow/schedule/{workflow_run_id}": {
+      "get": {
+        "summary": "Get Scheduled Workflow by Run ID",
+        "description": "Retrieve data from a scheduled workflow execution.",
+        "operationId": "getWorkflowScheduleByRunId",
+        "tags": [
+          "workflows"
+        ],
+        "parameters": [
+          {
+            "name": "workflow_run_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique run ID of the scheduled workflow execution",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow schedule details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "description": "Unique identifier of the execution"
+                        },
+                        "workflow_id": {
+                          "type": "string",
+                          "description": "ID of the executed workflow"
+                        },
+                        "workflow_name": {
+                          "type": "string",
+                          "description": "Name of the executed workflow"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["executed", "failed", "skipped"],
+                          "description": "Status of the execution"
+                        },
+                        "created": {
+                          "type": "string",
+                          "description": "Timestamp when the execution was created"
+                        },
+                        "executed": {
+                          "type": "string",
+                          "description": "Timestamp when the execution was completed"
+                        },
+                        "result": {
+                          "type": "object",
+                          "description": "The result of the workflow execution"
+                        },
+                        "input": {
+                          "type": "object",
+                          "description": "The input provided to the workflow"
+                        }
+                      }
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "total_documents": {
+                          "type": "integer",
+                          "description": "Total number of matching execution records"
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "Operation status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow run not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentCreate": {
+        "type": "object",
+        "required": ["name", "description", "configuration"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique name for the agent"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of the agent's purpose and capabilities"
+          },
+          "configuration": {
+            "type": "object",
+            "description": "Agent configuration settings",
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "AI model to use for this agent"
+              },
+              "prompt_template": {
+                "type": "string",
+                "description": "Template for agent prompts"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Tools available to the agent"
+              },
+              "parameters": {
+                "type": "object",
+                "description": "Additional configuration parameters"
+              }
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags for categorizing the agent"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of agent capabilities"
+          }
+        }
+      },
+      "AgentUpdate": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Updated description of the agent"
+          },
+          "configuration": {
+            "type": "object",
+            "description": "Updated agent configuration settings"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Updated tags for the agent"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Updated list of agent capabilities"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the agent is active"
+          }
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for the agent"
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name of the agent"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of the agent"
+          },
+          "configuration": {
+            "type": "object",
+            "description": "Agent configuration settings"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags categorizing the agent"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of agent capabilities"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the agent was created"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the agent was last updated"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the agent is active"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner of the agent"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiToken": {
+        "type": "apiKey",
+        "name": "x-api-token",
+        "in": "header",
+        "description": "API key authentication"
+      }
+    }
+  }
+}
